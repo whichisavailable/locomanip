@@ -38,6 +38,22 @@ parser.add_argument(
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
 parser.add_argument("--keyboard", action="store_true", default=False, help="Whether to use keyboard.")
+parser.add_argument(
+    "--go2arm_ee_pos",
+    type=float,
+    nargs=3,
+    metavar=("X_B", "Y_B", "Z_W"),
+    default=None,
+    help="Fixed Go2Arm ee target position for play: base-frame x/y and world-frame z.",
+)
+parser.add_argument(
+    "--go2arm_ee_rpy",
+    type=float,
+    nargs=3,
+    metavar=("ROLL_B", "PITCH_B", "YAW_B"),
+    default=None,
+    help="Fixed Go2Arm ee target orientation for play in base-frame roll/pitch/yaw radians.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -58,6 +74,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import os
+import math
 import time
 
 import gymnasium as gym
@@ -90,6 +107,70 @@ from rl_utils import camera_follow
 # PLACEHOLDER: Extension template (do not remove this comment)
 
 
+def _format_pitch_debug_line(env) -> str | None:
+    """Return a compact pitch debug line for env 0."""
+    try:
+        scene = env.unwrapped.scene
+        robot = scene["robot"]
+        quat_wxyz = robot.data.root_quat_w[0]
+        gravity_b = robot.data.projected_gravity_b[0]
+
+        w, x, y, z = quat_wxyz.unbind(dim=-1)
+        reward_pitch = torch.asin(torch.clamp(2.0 * (w * y - z * x), -1.0, 1.0))
+        gravity_pitch = torch.atan2(
+            -gravity_b[0],
+            torch.sqrt(gravity_b[1] * gravity_b[1] + gravity_b[2] * gravity_b[2]),
+        )
+
+        front_rear_dz_text = "n/a"
+        body_names = getattr(robot, "body_names", [])
+        front_names = ("FL_hip", "FR_hip")
+        rear_names = ("RL_hip", "RR_hip")
+        if all(name in body_names for name in (*front_names, *rear_names)):
+            front_ids = [body_names.index(name) for name in front_names]
+            rear_ids = [body_names.index(name) for name in rear_names]
+            body_pos_w = robot.data.body_pos_w[0]
+            front_z = torch.mean(body_pos_w[front_ids, 2])
+            rear_z = torch.mean(body_pos_w[rear_ids, 2])
+            front_rear_dz = front_z - rear_z
+            front_rear_dz_text = f"{front_rear_dz.item():+.4f} m"
+
+        return (
+            "[PITCH env0] "
+            f"reward_pitch={reward_pitch.item():+.4f} rad/{math.degrees(reward_pitch.item()):+.1f} deg, "
+            f"gravity_pitch={gravity_pitch.item():+.4f} rad/{math.degrees(gravity_pitch.item()):+.1f} deg, "
+            f"front_rear_dz={front_rear_dz_text}"
+        )
+    except Exception as exc:
+        return f"[PITCH env0] unavailable: {exc}"
+
+
+def _format_go2arm_tracking_debug_lines(env) -> list[str]:
+    """Return Go2Arm play debug lines for env 0."""
+    lines: list[str] = []
+    try:
+        scene = env.unwrapped.scene
+        robot = scene["robot"]
+        quat_wxyz = robot.data.root_quat_w[0]
+        w, x, y, z = quat_wxyz.unbind(dim=-1)
+        pitch = torch.asin(torch.clamp(2.0 * (w * y - z * x), -1.0, 1.0))
+        lines.append(f"[PITCH env0] {pitch.item():+.4f} rad / {math.degrees(pitch.item()):+.2f} deg")
+    except Exception as exc:
+        lines.append(f"[PITCH env0] unavailable: {exc}")
+
+    try:
+        command_term = env.unwrapped.command_manager.get_term("ee_pose")
+        position_error = command_term.position_tracking_error[0]
+        orientation_error = command_term.orientation_tracking_error[0]
+        lines.append(f"[EE POSITION ERROR env0] {position_error.item():.6f}")
+        lines.append(f"[EE ORIENTATION ERROR env0] {orientation_error.item():.6f}")
+    except Exception as exc:
+        lines.append(f"[EE POSITION ERROR env0] unavailable: {exc}")
+        lines.append(f"[EE ORIENTATION ERROR env0] unavailable: {exc}")
+
+    return lines
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Play with RSL-RL agent."""
@@ -120,6 +201,49 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.events.push_robot = None
     env_cfg.curriculum.command_levels_lin_vel = None
     env_cfg.curriculum.command_levels_ang_vel = None
+    go2arm_fixed_target = args_cli.go2arm_ee_pos is not None or args_cli.go2arm_ee_rpy is not None
+    if go2arm_fixed_target and hasattr(env_cfg.curriculum, "go2arm_reaching_stages"):
+        env_cfg.curriculum.go2arm_reaching_stages = None
+        if hasattr(env_cfg.commands, "ee_pose"):
+            if args_cli.go2arm_ee_pos is not None:
+                ee_x_b, ee_y_b, ee_z_w = args_cli.go2arm_ee_pos
+                env_cfg.commands.ee_pose.position_range_b = (ee_x_b, ee_x_b, ee_y_b, ee_y_b, 0.0, 0.0)
+                env_cfg.commands.ee_pose.world_z_range = (ee_z_w, ee_z_w)
+            else:
+                env_cfg.commands.ee_pose.position_range_b = (0.05, 2.00, -0.35, 0.35, 0.0, 0.0)
+                env_cfg.commands.ee_pose.world_z_range = (0.02, 1.20)
+            if args_cli.go2arm_ee_rpy is not None:
+                ee_roll_b, ee_pitch_b, ee_yaw_b = args_cli.go2arm_ee_rpy
+                env_cfg.commands.ee_pose.euler_xyz_range_b = (
+                    ee_roll_b,
+                    ee_roll_b,
+                    ee_pitch_b,
+                    ee_pitch_b,
+                    ee_yaw_b,
+                    ee_yaw_b,
+                )
+            print(
+                "[INFO] Go2Arm fixed ee command override: "
+                f"pos={args_cli.go2arm_ee_pos}, rpy={args_cli.go2arm_ee_rpy}"
+            )
+            env_cfg.commands.ee_pose.sample_z_in_world_frame = True
+            env_cfg.commands.ee_pose.reject_position_cuboid = None
+            env_cfg.commands.ee_pose.max_sampling_tries = 1
+            env_cfg.commands.ee_pose.secondary_position_range_b = None
+            env_cfg.commands.ee_pose.secondary_euler_xyz_range_b = None
+            env_cfg.commands.ee_pose.secondary_world_z_range = None
+            env_cfg.commands.ee_pose.secondary_sample_prob = 0.0
+            env_cfg.commands.ee_pose.tertiary_position_range_b = None
+            env_cfg.commands.ee_pose.tertiary_euler_xyz_range_b = None
+            env_cfg.commands.ee_pose.tertiary_world_z_range = None
+            env_cfg.commands.ee_pose.tertiary_sample_prob = 0.0
+        env_cfg.events.randomize_reset_joints.params["position_range"] = (-0.04, 0.04)
+        env_cfg.events.randomize_reset_joints.params["velocity_range"] = (-0.05, 0.05)
+        env_cfg.events.randomize_reset_base.params["pose_range"] = {
+            "x": (-0.06, 0.06),
+            "y": (-0.06, 0.06),
+            "yaw": (-0.18, 0.18),
+        }
 
     if args_cli.keyboard:
         env_cfg.scene.num_envs = 1
@@ -206,16 +330,42 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     else:
         normalizer = None
 
-    # export policy to onnx/jit
+    # 导出策略到 jit / onnx。
+    # 只要策略对象自己提供了 as_jit()/as_onnx()，就直接使用策略自带的导出包装。
+    # 这样可以确保 go2arm 这类自定义 privileged teacher policy 走正确的导出语义。
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    if hasattr(policy_nn, "as_jit") and hasattr(policy_nn, "as_onnx"):
+        os.makedirs(export_model_dir, exist_ok=True)
+
+        # 直接导出 TorchScript。
+        jit_model = policy_nn.as_jit()
+        jit_model.to("cpu")
+        torch.jit.script(jit_model).save(os.path.join(export_model_dir, "policy.pt"))
+
+        # 直接导出 ONNX。
+        onnx_model = policy_nn.as_onnx(verbose=False)
+        onnx_model.to("cpu")
+        onnx_model.eval()
+        torch.onnx.export(
+            onnx_model,
+            onnx_model.get_dummy_inputs(),
+            os.path.join(export_model_dir, "policy.onnx"),
+            export_params=True,
+            opset_version=18,
+            verbose=False,
+            input_names=onnx_model.input_names,
+            output_names=onnx_model.output_names,
+        )
+    else:
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
     obs = env.get_observations()
     timestep = 0
+    last_time_print = time.time()
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -240,6 +390,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
+
+        # print current time every 1 second
+        now = time.time()
+        if now - last_time_print >= 1.0:
+            print(f"[TIME] {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
+            for debug_line in _format_go2arm_tracking_debug_lines(env):
+                print(debug_line)
+            last_time_print = now
 
     # close the simulator
     env.close()

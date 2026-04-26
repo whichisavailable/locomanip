@@ -11,6 +11,7 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
 import sys
 
 from isaaclab.app import AppLauncher
@@ -24,6 +25,12 @@ parser.add_argument("--video", action="store_true", default=False, help="Record 
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument(
+    "--low_vram_num_envs",
+    type=int,
+    default=64,
+    help="Auto-cap num_envs to this value when GPU memory is <= 4.5 GiB and --num_envs is not provided.",
+)
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
     "--agent", type=str, default="rsl_rl_cfg_entry_point", help="Name of the RL agent configuration entry point."
@@ -42,6 +49,9 @@ cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+
+# reduce CUDA memory fragmentation unless user already set it
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 # always enable cameras to record video
 if args_cli.video:
@@ -79,7 +89,6 @@ if version.parse(installed_version) < version.parse(RSL_RL_VERSION):
 """Rest everything follows."""
 
 import logging
-import os
 import time
 from datetime import datetime
 
@@ -115,6 +124,87 @@ torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
 
+def _reset_go2arm_arm_std(policy, arm_action_indices: tuple[int, ...], arm_std: float) -> bool:
+    """Reset Go2Arm arm action std for supported RSL-RL policy variants."""
+    index = torch.as_tensor(arm_action_indices, dtype=torch.long)
+    reset_done = False
+
+    std_param = getattr(policy, "std", None)
+    if isinstance(std_param, torch.nn.Parameter) and std_param.ndim == 1:
+        index_device = index.to(std_param.device)
+        with torch.no_grad():
+            std_param.data[index_device] = float(arm_std)
+        reset_done = True
+
+    distribution = getattr(policy, "distribution", None)
+    dist_std_param = getattr(distribution, "std_param", None)
+    if isinstance(dist_std_param, torch.nn.Parameter) and dist_std_param.ndim == 1:
+        index_device = index.to(dist_std_param.device)
+        with torch.no_grad():
+            dist_std_param.data[index_device] = float(arm_std)
+        reset_done = True
+
+    dist_log_std_param = getattr(distribution, "log_std_param", None)
+    if isinstance(dist_log_std_param, torch.nn.Parameter) and dist_log_std_param.ndim == 1:
+        index_device = index.to(dist_log_std_param.device)
+        log_arm_std = torch.log(torch.tensor(float(arm_std), device=dist_log_std_param.device))
+        with torch.no_grad():
+            dist_log_std_param.data[index_device] = log_arm_std
+        reset_done = True
+
+    return reset_done
+
+
+def _get_go2arm_policy(runner):
+    """Return the policy module across RSL-RL versions."""
+    get_policy = getattr(runner.alg, "get_policy", None)
+    if callable(get_policy):
+        return get_policy()
+    for owner in (runner.alg, runner):
+        for attr_name in ("actor_critic", "policy"):
+            policy = getattr(owner, attr_name, None)
+            if policy is not None:
+                return policy
+    return None
+
+
+def _install_go2arm_mani_phase_reset_hook(runner, agent_cfg) -> None:
+    """Install a robot_lab-only hook that resets arm std and PPO lr at a configured iteration."""
+    reset_iteration = getattr(agent_cfg, "go2arm_mani_phase_reset_iteration", None)
+    if reset_iteration is None:
+        return
+
+    arm_std = float(getattr(agent_cfg, "go2arm_mani_phase_reset_arm_std", 0.4))
+    learning_rate = float(getattr(agent_cfg, "go2arm_mani_phase_reset_learning_rate", 3.0e-4))
+    arm_action_indices = tuple(getattr(agent_cfg, "go2arm_mani_phase_reset_arm_action_indices", range(12, 18)))
+    num_steps_per_env = int(getattr(agent_cfg, "num_steps_per_env", runner.cfg.get("num_steps_per_env", 1)))
+    start_iteration = int(getattr(runner, "current_learning_iteration", 0))
+
+    original_act = runner.alg.act
+    hook_state = {"step_calls": 0, "triggered": False}
+
+    def act_with_go2arm_mani_reset(*args, **kwargs):
+        rollout_iteration = start_iteration + hook_state["step_calls"] // max(num_steps_per_env, 1)
+        step_in_iteration = hook_state["step_calls"] % max(num_steps_per_env, 1)
+        if (not hook_state["triggered"]) and rollout_iteration == int(reset_iteration) and step_in_iteration == 0:
+            policy = _get_go2arm_policy(runner)
+            std_reset = False
+            if policy is not None:
+                std_reset = _reset_go2arm_arm_std(policy, arm_action_indices=arm_action_indices, arm_std=arm_std)
+            runner.alg.learning_rate = learning_rate
+            for param_group in runner.alg.optimizer.param_groups:
+                param_group["lr"] = learning_rate
+            hook_state["triggered"] = True
+            print(
+                "[INFO] Go2Arm mani phase reset at iteration "
+                f"{rollout_iteration}: arm_std={arm_std}, lr={learning_rate}, std_reset={std_reset}"
+            )
+        hook_state["step_calls"] += 1
+        return original_act(*args, **kwargs)
+
+    runner.alg.act = act_with_go2arm_mani_reset
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
@@ -124,6 +214,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     agent_cfg.max_iterations = (
         args_cli.max_iterations if args_cli.max_iterations is not None else agent_cfg.max_iterations
     )
+
+    # auto downscale environment count for low-VRAM GPUs when user doesn't override --num_envs
+    if args_cli.num_envs is None and args_cli.low_vram_num_envs is not None:
+        device = env_cfg.sim.device if env_cfg.sim.device is not None else ""
+        if isinstance(device, str) and "cuda" in device and torch.cuda.is_available():
+            cuda_index = 0
+            if ":" in device:
+                try:
+                    cuda_index = int(device.split(":")[-1])
+                except ValueError:
+                    cuda_index = 0
+            total_mem_gib = torch.cuda.get_device_properties(cuda_index).total_memory / (1024**3)
+            if total_mem_gib <= 4.5:
+                original_num_envs = env_cfg.scene.num_envs
+                env_cfg.scene.num_envs = min(env_cfg.scene.num_envs, args_cli.low_vram_num_envs)
+                if env_cfg.scene.num_envs < original_num_envs:
+                    logger.warning(
+                        "Detected low-VRAM GPU (%.2f GiB). Auto reducing num_envs from %s to %s. "
+                        "You can override with --num_envs.",
+                        total_mem_gib,
+                        original_num_envs,
+                        env_cfg.scene.num_envs,
+                    )
 
     # set the environment seed
     # note: certain randomizations occur in the environment initialization so we set the seed here
@@ -212,6 +325,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         runner.load(resume_path)
+
+    _install_go2arm_mani_phase_reset_hook(runner, agent_cfg)
 
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)

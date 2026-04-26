@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2026 Ziqi Fan
+# Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 """Configuration for Unitree robots.
@@ -6,7 +6,7 @@ Reference: https://github.com/unitreerobotics/unitree_ros
 """
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg
+from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg, DelayedPDActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
@@ -15,6 +15,123 @@ from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
 # Configuration
 ##
 
+# 本质上算asset_cfg.py的功能
+
+UNITREE_Go2Arm_USD_CFG = ArticulationCfg(
+    spawn=sim_utils.UsdFileCfg(
+        usd_path=(
+            f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/unitree/go2arm_description/urdf/"
+            "go2_piper_description_mjc_NoGripper/go2_piper_description_mjc_NoGripper.usd"
+        ),
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False, 
+            solver_position_iteration_count=8, 
+            solver_velocity_iteration_count=4,
+        ),
+    ),
+    init_state=ArticulationCfg.InitialStateCfg(
+        pos=(0.0, 0.0, 0.4),    # root position
+        joint_pos={
+            ".*_hip_joint": 0.0,
+            ".*_thigh_joint": 0.8,
+            ".*_calf_joint": -1.5,
+            # Piper arm joints (joint1..joint6)
+            # Avoid initializing at one-sided joint limits (joint2: [0, pi], joint3: [-2.967, 0]),
+            # otherwise reset randomization can clamp them at 0 and the arm gets stuck early in training.
+            # Keep the arm reasonably tucked to reduce early falls / illegal_contact terminations.
+            "joint1": 0.0,
+            "joint2": 0.314,
+            "joint3": -0.2967,
+            "joint4": 0.0,
+            "joint5": 0.0,
+            "joint6": 0.0,
+        },
+        joint_vel={".*": 0.0},
+    ),
+    soft_joint_pos_limit_factor=0.9,
+    # 按 URDF 名称分三组执行器：
+    # - hip_thigh: 8 个腿部关节（*_hip_joint, *_thigh_joint）
+    # - calf: 4 个腿部关节（*_calf_joint）
+    # - upper: 6 个机械臂关节（joint1..joint6）
+    actuators={
+        "leg_hip_thigh": DelayedPDActuatorCfg(
+            joint_names_expr=[r".*_hip_joint", r".*_thigh_joint"],
+            effort_limit=23.7,  
+            velocity_limit=30.1,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
+            # armature=0.01,
+            # min_delay=JOINT_MIN_DELAY_STEP,
+            # max_delay=JOINT_MAX_DELAY_STEP,
+        ),
+        "leg_calf": DelayedPDActuatorCfg(
+            joint_names_expr=[r".*_calf_joint"],
+            effort_limit=45.43,
+            velocity_limit=15.70,
+            stiffness=25.0,
+            damping=0.5,
+            friction=0.0,
+            # armature=0.01,
+            # min_delay=JOINT_MIN_DELAY_STEP,
+            # max_delay=JOINT_MAX_DELAY_STEP,
+        ),
+        "arm": DelayedPDActuatorCfg(
+            joint_names_expr=[r"joint[1-6]"],
+            effort_limit=50,
+            velocity_limit=28,
+            stiffness=30.0,
+            damping=1.0,
+            friction=0.0,
+            # armature=0.01,
+            # min_delay=0,
+            # max_delay=0,
+        ),
+    },
+)
+
+UNITREE_Go2Arm_CFG = ArticulationCfg(
+    spawn=sim_utils.UrdfFileCfg(
+        fix_base=False,
+        merge_fixed_joints=False,
+        replace_cylinders_with_capsules=False,
+        asset_path=(
+            f"{ISAACLAB_ASSETS_DATA_DIR}/Robots/unitree/go2arm_description/urdf/"
+            "go2_piper_description_mjc_NoGripper.urdf"
+        ),
+        activate_contact_sensors=True,
+        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+            disable_gravity=False,
+            retain_accelerations=False,
+            linear_damping=0.0,
+            angular_damping=0.0,
+            max_linear_velocity=1000.0,
+            max_angular_velocity=1000.0,
+            max_depenetration_velocity=1.0,
+        ),
+        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+            enabled_self_collisions=False,
+            solver_position_iteration_count=8,
+            solver_velocity_iteration_count=4,
+        ),
+        joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
+            gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0.0, damping=0.0)
+        ),
+    ),
+    init_state=UNITREE_Go2Arm_USD_CFG.init_state,
+    soft_joint_pos_limit_factor=UNITREE_Go2Arm_USD_CFG.soft_joint_pos_limit_factor,
+    actuators=UNITREE_Go2Arm_USD_CFG.actuators,
+)
 
 UNITREE_A1_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
