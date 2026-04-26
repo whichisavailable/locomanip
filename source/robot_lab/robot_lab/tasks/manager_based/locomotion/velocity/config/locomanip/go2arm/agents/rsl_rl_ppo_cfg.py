@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from isaaclab.utils import configclass
+
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
-from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.rough_env_cfg import UnitreeGo2ArmRoughEnvCfg
+from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.rough_env_cfg import (
+    UnitreeGo2ArmRoughEnvCfg,
+)
 
 
 def _resolve_init_noise_std(*, allow_vector: bool) -> float | tuple[float, ...]:
@@ -75,7 +78,10 @@ class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     }
 
     policy = RslRlPpoActorCriticCfg(
-        class_name='__import__("robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.legacy_actor_critic", fromlist=["PrivilegedTeacherActorCritic"]).PrivilegedTeacherActorCritic',
+        class_name=(
+            '__import__("robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.'
+            'legacy_actor_critic", fromlist=["PrivilegedTeacherActorCritic"]).PrivilegedTeacherActorCritic'
+        ),
         # teacher 版本同样先降低早期探索噪声，优先观察姿态/接触问题而不是纯噪声扰动。
         init_noise_std=_resolve_init_noise_std(allow_vector=True),
         actor_obs_normalization=True,

@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 """Configuration for Unitree robots.
@@ -6,7 +6,7 @@ Reference: https://github.com/unitreerobotics/unitree_ros
 """
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import DCMotorCfg, ImplicitActuatorCfg, DelayedPDActuatorCfg
+from isaaclab.actuators import DCMotorCfg, DelayedPDActuatorCfg, ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
 
 from robot_lab.assets import ISAACLAB_ASSETS_DATA_DIR
@@ -34,13 +34,13 @@ UNITREE_Go2Arm_USD_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False, 
-            solver_position_iteration_count=8, 
+            enabled_self_collisions=False,
+            solver_position_iteration_count=8,
             solver_velocity_iteration_count=4,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.4),    # root position
+        pos=(0.0, 0.0, 0.4),  # root position
         joint_pos={
             ".*_hip_joint": 0.0,
             ".*_thigh_joint": 0.8,
@@ -66,7 +66,7 @@ UNITREE_Go2Arm_USD_CFG = ArticulationCfg(
     actuators={
         "leg_hip_thigh": DelayedPDActuatorCfg(
             joint_names_expr=[r".*_hip_joint", r".*_thigh_joint"],
-            effort_limit=23.7,  
+            effort_limit=23.7,
             velocity_limit=30.1,
             stiffness=25.0,
             damping=0.5,

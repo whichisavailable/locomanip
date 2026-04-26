@@ -266,13 +266,17 @@ class EndEffectorPoseCommand(CommandTerm):
         primary_pos_range_values = self.cfg.position_range_b if sample_in_base_frame else self.cfg.position_range_w
         primary_pos_ranges = torch.tensor(primary_pos_range_values, dtype=torch.float32, device=self.device)
         # 若启用“xy 用 base frame、z 用 world frame”的混合采样，则 z 单独从世界系范围采样。
-        sample_world_z = sample_in_base_frame and self.cfg.sample_z_in_world_frame and self.cfg.world_z_range is not None
+        sample_world_z = (
+            sample_in_base_frame and self.cfg.sample_z_in_world_frame and self.cfg.world_z_range is not None
+        )
         primary_world_z_ranges = (
             torch.tensor(self.cfg.world_z_range, dtype=torch.float32, device=self.device) if sample_world_z else None
         )
         # 欧拉角采样范围，格式为 roll_min roll_max pitch_min pitch_max yaw_min yaw_max。
         primary_euler_range_values = (
-            self.cfg.euler_xyz_range_b if sample_in_base_frame and self.cfg.euler_xyz_range_b is not None else self.cfg.euler_xyz_range
+            self.cfg.euler_xyz_range_b
+            if sample_in_base_frame and self.cfg.euler_xyz_range_b is not None
+            else self.cfg.euler_xyz_range
         )
         primary_euler_ranges = torch.tensor(primary_euler_range_values, dtype=torch.float32, device=self.device)
         # 可选的第二/第三采样分布，仅用于显式课程混采，例如低 z / 高 z 高难区。
@@ -289,7 +293,9 @@ class EndEffectorPoseCommand(CommandTerm):
             and self.cfg.tertiary_sample_prob > 0.0
         )
         if has_secondary_distribution:
-            secondary_pos_ranges = torch.tensor(self.cfg.secondary_position_range_b, dtype=torch.float32, device=self.device)
+            secondary_pos_ranges = torch.tensor(
+                self.cfg.secondary_position_range_b, dtype=torch.float32, device=self.device
+            )
             secondary_euler_ranges = torch.tensor(
                 self.cfg.secondary_euler_xyz_range_b, dtype=torch.float32, device=self.device
             )
@@ -303,7 +309,9 @@ class EndEffectorPoseCommand(CommandTerm):
             secondary_euler_ranges = None
             secondary_world_z_ranges = None
         if has_tertiary_distribution:
-            tertiary_pos_ranges = torch.tensor(self.cfg.tertiary_position_range_b, dtype=torch.float32, device=self.device)
+            tertiary_pos_ranges = torch.tensor(
+                self.cfg.tertiary_position_range_b, dtype=torch.float32, device=self.device
+            )
             tertiary_euler_ranges = torch.tensor(
                 self.cfg.tertiary_euler_xyz_range_b, dtype=torch.float32, device=self.device
             )
@@ -320,12 +328,16 @@ class EndEffectorPoseCommand(CommandTerm):
             sample_selector = torch.rand(num_samples, device=self.device)
             secondary_prob = float(self.cfg.secondary_sample_prob) if has_secondary_distribution else 0.0
             tertiary_prob = float(self.cfg.tertiary_sample_prob) if has_tertiary_distribution else 0.0
-            use_secondary_distribution = (sample_selector < secondary_prob) if has_secondary_distribution else torch.zeros(
-                num_samples, dtype=torch.bool, device=self.device
+            use_secondary_distribution = (
+                (sample_selector < secondary_prob)
+                if has_secondary_distribution
+                else torch.zeros(num_samples, dtype=torch.bool, device=self.device)
             )
             use_tertiary_distribution = (
-                (sample_selector >= secondary_prob) & (sample_selector < secondary_prob + tertiary_prob)
-            ) if has_tertiary_distribution else torch.zeros(num_samples, dtype=torch.bool, device=self.device)
+                ((sample_selector >= secondary_prob) & (sample_selector < secondary_prob + tertiary_prob))
+                if has_tertiary_distribution
+                else torch.zeros(num_samples, dtype=torch.bool, device=self.device)
+            )
         else:
             use_secondary_distribution = torch.zeros(num_samples, dtype=torch.bool, device=self.device)
             use_tertiary_distribution = torch.zeros(num_samples, dtype=torch.bool, device=self.device)
@@ -360,7 +372,9 @@ class EndEffectorPoseCommand(CommandTerm):
             pending_pos_ranges = primary_pos_ranges.unsqueeze(0).repeat(pending_count, 1)
             pending_euler_ranges = primary_euler_ranges.unsqueeze(0).repeat(pending_count, 1)
             pending_world_z_ranges = (
-                primary_world_z_ranges.unsqueeze(0).repeat(pending_count, 1) if sample_world_z and primary_world_z_ranges is not None else None
+                primary_world_z_ranges.unsqueeze(0).repeat(pending_count, 1)
+                if sample_world_z and primary_world_z_ranges is not None
+                else None
             )
             if has_secondary_distribution and secondary_pos_ranges is not None and secondary_euler_ranges is not None:
                 pending_pos_ranges[pending_use_secondary] = secondary_pos_ranges
@@ -375,10 +389,14 @@ class EndEffectorPoseCommand(CommandTerm):
 
             # 在世界系范围内均匀采样目标位置。
             sampled_world_z = (
-                torch.empty(pending_count, device=self.device).uniform_(0.0, 1.0)
-                * (pending_world_z_ranges[:, 1] - pending_world_z_ranges[:, 0])
-                + pending_world_z_ranges[:, 0]
-            ) if pending_world_z_ranges is not None else None
+                (
+                    torch.empty(pending_count, device=self.device).uniform_(0.0, 1.0)
+                    * (pending_world_z_ranges[:, 1] - pending_world_z_ranges[:, 0])
+                    + pending_world_z_ranges[:, 0]
+                )
+                if pending_world_z_ranges is not None
+                else None
+            )
             sampled_x_local = (
                 torch.empty(pending_count, device=self.device).uniform_(0.0, 1.0)
                 * (pending_pos_ranges[:, 1] - pending_pos_ranges[:, 0])
@@ -390,10 +408,14 @@ class EndEffectorPoseCommand(CommandTerm):
                 + pending_pos_ranges[:, 2]
             )
             sampled_z_local = (
-                torch.empty(pending_count, device=self.device).uniform_(0.0, 1.0)
-                * (pending_pos_ranges[:, 5] - pending_pos_ranges[:, 4])
-                + pending_pos_ranges[:, 4]
-            ) if sampled_world_z is None else None
+                (
+                    torch.empty(pending_count, device=self.device).uniform_(0.0, 1.0)
+                    * (pending_pos_ranges[:, 5] - pending_pos_ranges[:, 4])
+                    + pending_pos_ranges[:, 4]
+                )
+                if sampled_world_z is None
+                else None
+            )
             pos_local = torch.stack(
                 [
                     sampled_x_local,
@@ -485,7 +507,9 @@ class EndEffectorPoseCommand(CommandTerm):
             remaining = torch.where(~valid_mask)[0]
             remaining_pos_ranges = primary_pos_ranges.unsqueeze(0).repeat(remaining.numel(), 1)
             remaining_world_z_ranges = (
-                primary_world_z_ranges.unsqueeze(0).repeat(remaining.numel(), 1) if sample_world_z and primary_world_z_ranges is not None else None
+                primary_world_z_ranges.unsqueeze(0).repeat(remaining.numel(), 1)
+                if sample_world_z and primary_world_z_ranges is not None
+                else None
             )
             if has_secondary_distribution and secondary_pos_ranges is not None:
                 remaining_use_secondary = use_secondary_distribution[remaining]
@@ -553,7 +577,9 @@ class EndEffectorPoseCommand(CommandTerm):
         )
 
         # 每一步只计算一次位置误差和姿态误差，后续 observation / reward 直接复用缓存。
-        self.position_tracking_error, self.orientation_tracking_error = self._compute_tracking_errors(ee_pos_w, ee_quat_w)
+        self.position_tracking_error, self.orientation_tracking_error = self._compute_tracking_errors(
+            ee_pos_w, ee_quat_w
+        )
         self.tracking_error = (
             self.cfg.position_error_weight * self.position_tracking_error
             + self.cfg.orientation_error_weight * self.orientation_tracking_error
@@ -589,15 +615,11 @@ class EndEffectorPoseCommand(CommandTerm):
         )
         if init_ids.numel() > 0:
             self.cumulative_tracking_error[init_ids] = (
-                self.cfg.cumulative_error_weight
-                * cumulative_error_gate[init_ids]
-                * self.tracking_error[init_ids]
+                self.cfg.cumulative_error_weight * cumulative_error_gate[init_ids] * self.tracking_error[init_ids]
             )
         if active_ids.numel() > 0:
             self.cumulative_tracking_error[active_ids] += (
-                self.cfg.cumulative_error_weight
-                * cumulative_error_gate[active_ids]
-                * self.tracking_error[active_ids]
+                self.cfg.cumulative_error_weight * cumulative_error_gate[active_ids] * self.tracking_error[active_ids]
             )
 
     def _update_metrics(self):
@@ -612,7 +634,9 @@ class EndEffectorPoseCommand(CommandTerm):
             * (self.reference_tracking_error - self.cfg.cumulative_error_gating_mu)
         )
 
-    def _compute_tracking_errors(self, ee_pos_w: torch.Tensor, ee_quat_w: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def _compute_tracking_errors(
+        self, ee_pos_w: torch.Tensor, ee_quat_w: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         # 位置偏差：当前位置与目标位置差的二范数。
         pos_error = torch.linalg.norm(ee_pos_w - self.target_pos_w, dim=-1)
 

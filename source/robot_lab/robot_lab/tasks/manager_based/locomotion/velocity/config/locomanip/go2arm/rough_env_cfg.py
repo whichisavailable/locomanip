@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 import math
@@ -8,8 +8,8 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
-from robot_lab.assets.unitree import UNITREE_Go2Arm_CFG
 import robot_lab.tasks.manager_based.locomotion.velocity.mdp as mdp
+from robot_lab.assets.unitree import UNITREE_Go2Arm_CFG
 from robot_lab.tasks.manager_based.locomotion.velocity.cus_velocity_env_cfg import (
     GO2ARM_BASE_BODY_NAME,
     GO2ARM_NON_FOOT_BODY_REGEX,
@@ -98,9 +98,6 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             # 再从默认姿态出发只开放到软限位剩余空间的 60%，
             # 这样既保留足够的 reaching 工作空间，也避免联训初期大动作把底盘拉翻。
             "^joint1$": (-2.0944, 2.0944),
-            # Arm clips are relative to the default pose and cover the central 80% of URDF limits.
-            # joint2/joint3 default poses sit at the 10% margin, so zero action stays away from limits.
-            "^joint1$": (-2.0944, 2.0944),
             "^joint2$": (0.0, 2.512),
             "^joint3$": (-2.3736, 0.0),
             "^joint4$": (-1.396, 1.396),
@@ -168,9 +165,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Treat every non-foot body as illegal contact.
         # This prevents the policy from using base/body ground contact as a stabilizing strategy.
         non_foot_contact_body_regex = GO2ARM_NON_FOOT_BODY_REGEX
-        self.rewards.total_reward.params["mani_regularization_support_non_foot_contact_sensor_cfg"].body_names = (
-            non_foot_contact_body_regex
-        )
+        self.rewards.total_reward.params[
+            "mani_regularization_support_non_foot_contact_sensor_cfg"
+        ].body_names = non_foot_contact_body_regex
         self.rewards.total_reward.params["basic_collision_sensor_cfg"].body_names = non_foot_contact_body_regex
 
         # Validation override: make the arm and shoulder-side mount light so the base can drive reaching
@@ -198,6 +195,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             if self.commands.ee_pose.euler_xyz_range_b is not None
             else self.commands.ee_pose.euler_xyz_range[4:6]
         )
+        del target_pos_range, target_yaw_range
         root_reset_x_half_range = 0.02
         root_reset_y_half_range = 0.02
         root_reset_yaw_half_range = 0.08
@@ -392,7 +390,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_height_std"] = 0.0025
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_vel_std"] = 0.01
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.25
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_phase_offsets"] = GO2ARM_TROT_PHASE_OFFSETS
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_phase_offsets"] = (
+            GO2ARM_TROT_PHASE_OFFSETS
+        )
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_swing_height"] = 0.10
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 2.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"] = 2.0

@@ -161,7 +161,9 @@ def go2arm_reaching_stages(
     if current_iteration < stage1_end_iteration:
         stage_progress = _clamp_progress(current_iteration, 0, stage1_end_iteration)
         if position_range_b_stage1_start is not None:
-            current_position_range_b = _lerp_tuple(position_range_b_stage1_start, position_range_b_stage1, stage_progress)
+            current_position_range_b = _lerp_tuple(
+                position_range_b_stage1_start, position_range_b_stage1, stage_progress
+            )
         else:
             current_position_range_b = tuple(float(v) for v in position_range_b_stage1)
         current_euler_xyz_range_b = tuple(float(v) for v in euler_xyz_range_b_stage1)
@@ -216,7 +218,9 @@ def go2arm_reaching_stages(
             position_range_b_hard_low_start, position_range_b_hard_low_final, stage_progress
         )
         current_secondary_euler_xyz_range_b = tuple(float(v) for v in euler_xyz_range_b_hard_low)
-        current_secondary_world_z_range = _lerp_tuple(world_z_range_hard_low_start, world_z_range_hard_low_final, stage_progress)
+        current_secondary_world_z_range = _lerp_tuple(
+            world_z_range_hard_low_start, world_z_range_hard_low_final, stage_progress
+        )
         current_secondary_sample_prob = float(hard_low_sample_prob_stage2_base)
         current_tertiary_position_range_b = _lerp_tuple(
             position_range_b_hard_high_start, position_range_b_hard_high_final, stage_progress
@@ -273,7 +277,9 @@ def go2arm_reaching_stages(
             float(position_range_b_stage3[4]),
             float(position_range_b_stage3[5]),
         )
-        current_euler_xyz_range_b = _lerp_tuple(euler_xyz_range_b_stage2_allowed, euler_xyz_range_b_stage3, stage_progress)
+        current_euler_xyz_range_b = _lerp_tuple(
+            euler_xyz_range_b_stage2_allowed, euler_xyz_range_b_stage3, stage_progress
+        )
         current_world_z_range = tuple(float(v) for v in world_z_range_stage3)
         current_secondary_position_range_b = None
         current_secondary_euler_xyz_range_b = None

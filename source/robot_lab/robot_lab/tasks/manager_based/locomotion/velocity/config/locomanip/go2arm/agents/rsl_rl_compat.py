@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2026 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 from functools import reduce
@@ -7,7 +10,7 @@ import torch.nn as nn
 
 try:
     # 优先复用当前环境里 rsl_rl 已经提供的实现，避免重复定义。
-    from rsl_rl.modules import EmpiricalNormalization, HiddenState, MLP
+    from rsl_rl.modules import MLP, EmpiricalNormalization, HiddenState
 except ImportError:
     try:
         # 兼容部分版本：类存在于子模块，但没有从 modules 顶层重新导出。
@@ -35,7 +38,9 @@ except ImportError:
             }
             key = act_name.lower()
             if key not in act_dict:
-                raise ValueError(f"Invalid activation function '{act_name}'. Valid activations are: {list(act_dict.keys())}")
+                raise ValueError(
+                    f"Invalid activation function '{act_name}'. Valid activations are: {list(act_dict.keys())}"
+                )
             return act_dict[key]
 
         class MLP(nn.Sequential):

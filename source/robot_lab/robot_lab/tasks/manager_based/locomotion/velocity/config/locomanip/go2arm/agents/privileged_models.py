@@ -7,15 +7,15 @@ import copy
 
 import torch
 import torch.nn as nn
-from tensordict import TensorDict
-
 from rsl_rl.models.mlp_model import MLPModel
 from rsl_rl.modules.distribution import Distribution
 from rsl_rl.utils import resolve_callable, unpad_trajectories
+from tensordict import TensorDict
+
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.rsl_rl_compat import (
+    MLP,
     EmpiricalNormalization,
     HiddenState,
-    MLP,
 )
 
 
@@ -215,8 +215,7 @@ class PrivilegedEncoderMLPModel(MLPModel):
                 )
             if len(obs[group_name].shape) != 2:
                 raise ValueError(
-                    f"PrivilegedEncoderMLPModel 只支持 1D 观测，"
-                    f"但 '{group_name}' 的形状是 {obs[group_name].shape}。"
+                    f"PrivilegedEncoderMLPModel 只支持 1D 观测，但 '{group_name}' 的形状是 {obs[group_name].shape}。"
                 )
             total_dim += obs[group_name].shape[-1]
         return total_dim

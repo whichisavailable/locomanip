@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025 Ziqi Fan
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
@@ -11,12 +11,13 @@ from collections.abc import Callable
 from dataclasses import MISSING
 from typing import cast
 
-import isaaclab.sim as sim_utils
 import torch
+
+import isaaclab.sim as sim_utils
+import isaaclab.utils.string as string_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.envs.mdp.actions import joint_actions
-from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -29,12 +30,11 @@ from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
-from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-import isaaclab.utils.string as string_utils
 
 import robot_lab.tasks.manager_based.locomotion.velocity.mdp as mdp
-from robot_lab.tasks.manager_based.locomotion.velocity.velocity_env_cfg import ActionsCfg, CommandsCfg, ObservationsCfg
 from robot_lab.tasks.manager_based.locomotion.velocity.mdp import observations as mdp_obs
+from robot_lab.tasks.manager_based.locomotion.velocity.velocity_env_cfg import ActionsCfg, CommandsCfg, ObservationsCfg
+
 # 添加实验室的包
 # import isaaclab_nhb.tasks.mdp_nhb as mdp_nhb
 ##
@@ -76,8 +76,14 @@ GO2ARM_BASE_BODY_NAME = "base_link"
 # 四个足端 body 名称。
 GO2ARM_FOOT_BODY_NAMES = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 GO2ARM_FOOT_NAMES = list(GO2ARM_FOOT_BODY_NAMES)
-GO2ARM_CONTACT_SENSOR_PRIM_PATH = "{ENV_REGEX_NS}/Robot/.*"
-# 非法接触检测需要看到全身所有 body，具体哪些 patch 合法由底层逐 patch 聚合逻辑再细分。
+GO2ARM_CONTACT_SENSOR_PRIM_PATH = (
+    "{ENV_REGEX_NS}/Robot/.*(?:"
+    "FL_foot|FR_foot|RL_foot|RR_foot|"
+    "base_link|"
+    "link[1-6]"
+    ")$"
+)
+# 非法接触检测只覆盖足端、base_link 和机械臂主 link，避免腿部辅助碰撞体误触发。
 GO2ARM_NON_FOOT_BODY_REGEX = [r"^(?!.*(?:FL_foot|FR_foot|RL_foot|RR_foot)$).+"]
 # 预设 trot 步态偏置。
 GO2ARM_TROT_PHASE_OFFSETS = (0.0, 0.5, 0.5, 0.0)
@@ -152,37 +158,37 @@ class MySceneCfg(InteractiveSceneCfg):
     )
     # 四个足端各自的地形扫描器，用于 privileged 观测和支撑相关奖励。
     FL_foot_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/FL_foot",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
-            ray_alignment="yaw",
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
+        prim_path="{ENV_REGEX_NS}/Robot/FL_foot",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
     FR_foot_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/FR_foot",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
-            ray_alignment="yaw",
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
+        prim_path="{ENV_REGEX_NS}/Robot/FR_foot",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
     RL_foot_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/RL_foot",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
-            ray_alignment="yaw",
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
+        prim_path="{ENV_REGEX_NS}/Robot/RL_foot",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
     RR_foot_scanner = RayCasterCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/RR_foot",
-            offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
-            ray_alignment="yaw",
-            pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
-            debug_vis=False,
-            mesh_prim_paths=["/World/ground"],
-        )
+        prim_path="{ENV_REGEX_NS}/Robot/RR_foot",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.05, 0.0, 2.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=(0.2, 0.2)),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
     # go2arm 的全局 contact sensor 只保留任务语义真正需要的 body：
     # 1. foot/calf/calflower 用于精确足端接触与重复接触去重；
     # 2. arm links 用于非法接触与碰撞惩罚。
@@ -248,7 +254,6 @@ class MySceneCfg(InteractiveSceneCfg):
 ##
 # MDP settings
 ##
-
 
 
 @configclass
@@ -349,7 +354,6 @@ class Go2ArmTeacherActionsCfg:
         clip=None,
         preserve_order=True,
     )
-
 
 
 @configclass
@@ -608,7 +612,7 @@ class EventCfg:
         params={
             # 同时随机腿部和机械臂关节的初始状态。
             "asset_cfg": SceneEntityCfg(
-                "robot", 
+                "robot",
                 joint_names=[
                     "FL_hip_joint",
                     "FL_thigh_joint",
@@ -628,7 +632,8 @@ class EventCfg:
                     "joint4",
                     "joint5",
                     "joint6",
-                ],),
+                ],
+            ),
             # 关节初始位置扰动范围。
             "position_range": (-0.1, 0.1),
             # 关节初始速度扰动范围。
@@ -655,8 +660,6 @@ class EventCfg:
             },
         },
     )
-
-
 
 
 @configclass
@@ -694,23 +697,27 @@ class RewardsCfg:
             # 基座横滚稳定性正则的权重。
             "mani_regularization_support_roll_weight": 0.0,
             # 读取基座姿态的 body 配置。
-            "mani_regularization_support_roll_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "mani_regularization_support_roll_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             "mani_regularization_support_roll_std": 0.15**2,
             # 支撑足滑动惩罚权重。
             "mani_regularization_support_feet_slide_weight": 0.0,
             # 足端接触力传感器配置。
-            "mani_regularization_support_feet_slide_sensor_cfg": SceneEntityCfg("contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES),
+            "mani_regularization_support_feet_slide_sensor_cfg": SceneEntityCfg(
+                "contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES
+            ),
             # 足端刚体配置。
-            "mani_regularization_support_feet_slide_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_FOOT_BODY_NAMES),
+            "mani_regularization_support_feet_slide_asset_cfg": SceneEntityCfg(
+                "robot", body_names=GO2ARM_FOOT_BODY_NAMES
+            ),
             "mani_regularization_support_feet_slide_std": 0.1,
             # 足端不触地惩罚权重。
             "mani_regularization_support_foot_air_weight": 0.0,
             # 判断足端是否离地的接触力阈值。
             "mani_regularization_support_foot_air_threshold": 1.0,
             # 足端离地判断所用的接触传感器。
-            "mani_regularization_support_foot_air_sensor_cfg": SceneEntityCfg("contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES),
+            "mani_regularization_support_foot_air_sensor_cfg": SceneEntityCfg(
+                "contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES
+            ),
             "mani_regularization_support_foot_air_clip_max": 2.0,
             # 非足端接触惩罚总权重。
             "mani_regularization_support_non_foot_contact_weight": 0.0,
@@ -737,9 +744,7 @@ class RewardsCfg:
             "mani_regularization_target_height_pitch_high_height": 0.95,
             "mani_regularization_target_height_pitch_std": 0.15,
             "mani_regularization_min_base_height_weight": 0.0,
-            "mani_regularization_min_base_height_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "mani_regularization_min_base_height_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             "mani_regularization_min_base_height_sensor_cfg": None,
             "mani_regularization_min_base_height_minimum_height": 0.20,
             "mani_regularization_min_base_height_std": 0.05,
@@ -754,7 +759,9 @@ class RewardsCfg:
             # 机械臂靠近关节限位时的安全正则权重。
             "mani_regularization_joint_limit_safety_weight": 0.0,
             # 机械臂关节限位安全项读取的关节集合。
-            "mani_regularization_joint_limit_safety_asset_cfg": SceneEntityCfg("robot", joint_names=GO2ARM_ARM_JOINT_NAMES),
+            "mani_regularization_joint_limit_safety_asset_cfg": SceneEntityCfg(
+                "robot", joint_names=GO2ARM_ARM_JOINT_NAMES
+            ),
             "mani_regularization_joint_limit_safety_std": 1.0,
             "mani_regularization_support_left_right_x_symmetry_weight": 0.0,
             "mani_regularization_support_left_right_x_symmetry_std": 0.05,
@@ -793,9 +800,7 @@ class RewardsCfg:
             # 基座高度目标值。
             "loco_regularization_base_height_target_height": 0.33,
             # 读取基座高度的 body 配置。
-            "loco_regularization_base_height_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "loco_regularization_base_height_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             # 用于估计基座脚下地形高度的扫描器。
             "loco_regularization_base_height_sensor_cfg": SceneEntityCfg("height_scanner_base"),
             # 基座 roll 正则权重。
@@ -803,17 +808,13 @@ class RewardsCfg:
             # 基座 roll 正则标准差。
             "loco_regularization_base_roll_std": 0.1,
             # 基座 roll 正则对应的 body。
-            "loco_regularization_base_roll_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "loco_regularization_base_roll_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             # 基座 pitch 正则权重。
             "loco_regularization_base_pitch_weight": 0.0,
             # 基座 pitch 正则标准差。
             "loco_regularization_base_pitch_std": 0.1,
             # 基座 pitch 正则对应的 body。
-            "loco_regularization_base_pitch_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "loco_regularization_base_pitch_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             # 基座 roll 角速度正则权重。
             "loco_regularization_base_roll_ang_vel_weight": 0.0,
             # 基座 roll 角速度正则标准差。
@@ -835,24 +836,20 @@ class RewardsCfg:
             # 基座 z 方向速度正则标准差。
             "loco_regularization_base_z_vel_std": 0.2,
             # 基座 z 方向速度正则读取的 body。
-            "loco_regularization_base_z_vel_asset_cfg": SceneEntityCfg(
-                "robot", body_names=GO2ARM_BASE_BODY_NAME
-            ),
+            "loco_regularization_base_z_vel_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
             # 基座 body frame 侧向速度正则权重，用于抑制“身体不朝前、而是斜着走/横着漂”。
             "loco_regularization_base_lateral_vel_weight": 0.0,
             # 基座 body frame 侧向速度正则标准差。
             "loco_regularization_base_lateral_vel_std": 0.2,
             # 基座 body frame 侧向速度正则读取的 body。
-"loco_regularization_base_lateral_vel_asset_cfg": SceneEntityCfg(
-    "robot", body_names=GO2ARM_BASE_BODY_NAME
-),
-"loco_regularization_leg_posture_deviation_weight": 0.0,
+            "loco_regularization_base_lateral_vel_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_BASE_BODY_NAME),
+            "loco_regularization_leg_posture_deviation_weight": 0.0,
             "loco_regularization_leg_posture_deviation_std": math.sqrt(4.0 * (1.0 + 0.7 + 0.4)) * 0.25,
-"loco_regularization_leg_posture_deviation_asset_cfg": SceneEntityCfg(
-    "robot", joint_names=GO2ARM_LEG_JOINT_NAMES, preserve_order=True
-),
-"loco_regularization_leg_posture_deviation_joint_weights": None,
-# 相对 reset 默认站姿的前后摆动对称正则，用 phase-aware 的方式约束左右腿 x 向位移关系。
+            "loco_regularization_leg_posture_deviation_asset_cfg": SceneEntityCfg(
+                "robot", joint_names=GO2ARM_LEG_JOINT_NAMES, preserve_order=True
+            ),
+            "loco_regularization_leg_posture_deviation_joint_weights": None,
+            # 相对 reset 默认站姿的前后摆动对称正则，用 phase-aware 的方式约束左右腿 x 向位移关系。
             "loco_regularization_touchdown_left_right_x_symmetry_weight": 0.0,
             "loco_regularization_touchdown_left_right_x_symmetry_std": 0.05,
             "loco_regularization_touchdown_left_right_y_symmetry_weight": 0.0,
@@ -863,9 +860,13 @@ class RewardsCfg:
             # 软 trot 足端接触规律正则权重。
             "loco_regularization_feet_contact_soft_trot_weight": 0.0,
             # soft trot 正则读取的足端接触传感器。
-            "loco_regularization_feet_contact_soft_trot_sensor_cfg": SceneEntityCfg("contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES),
+            "loco_regularization_feet_contact_soft_trot_sensor_cfg": SceneEntityCfg(
+                "contact_forces", body_names=GO2ARM_FOOT_BODY_NAMES
+            ),
             # soft trot 正则读取的足端刚体。
-            "loco_regularization_feet_contact_soft_trot_asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_FOOT_BODY_NAMES),
+            "loco_regularization_feet_contact_soft_trot_asset_cfg": SceneEntityCfg(
+                "robot", body_names=GO2ARM_FOOT_BODY_NAMES
+            ),
             # soft trot 中接触力误差的标准差。
             "loco_regularization_feet_contact_soft_trot_force_std": 1.0,
             # soft trot 中足端高度误差的标准差。
@@ -943,6 +944,7 @@ class RewardsCfg:
             "eps": 1.0e-6,
         },
     )
+
 
 @configclass
 class TerminationsCfg:

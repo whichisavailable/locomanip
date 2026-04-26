@@ -758,7 +758,7 @@ main()
 
 如果用一句更贴近这个项目的话来概括，就是：
 
-`hydra_task_config(args_cli.task, args_cli.agent)` 的作用，不是去“挑一个装饰器类型”，而是告诉这层 Hydra 装配逻辑：“这次应该按哪个任务名、哪个 agent 入口去把配置找出来。” 
+`hydra_task_config(args_cli.task, args_cli.agent)` 的作用，不是去“挑一个装饰器类型”，而是告诉这层 Hydra 装配逻辑：“这次应该按哪个任务名、哪个 agent 入口去把配置找出来。”
 
 所以这里不是 `main` 自己会加载配置，而是装饰器帮它做了这件事。
 

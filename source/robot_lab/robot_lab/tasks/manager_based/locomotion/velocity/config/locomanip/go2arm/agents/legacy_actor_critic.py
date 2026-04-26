@@ -4,15 +4,15 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.rsl_rl_compat import (
-    EmpiricalNormalization,
     MLP,
+    EmpiricalNormalization,
 )
 
 
@@ -75,9 +75,7 @@ class PrivilegedTeacherActorCritic(nn.Module):
                 f"expected actor={expected_actor_obs}, critic={expected_critic_obs}."
             )
 
-        self.actor_obs_normalizer = (
-            EmpiricalNormalization(num_actor_obs) if actor_obs_normalization else nn.Identity()
-        )
+        self.actor_obs_normalizer = EmpiricalNormalization(num_actor_obs) if actor_obs_normalization else nn.Identity()
         self.critic_obs_normalizer = (
             EmpiricalNormalization(num_critic_obs) if critic_obs_normalization else nn.Identity()
         )
@@ -147,9 +145,7 @@ class PrivilegedTeacherActorCritic(nn.Module):
         self.distribution = Normal(mean, mean * 0.0 + self.std)
 
     @staticmethod
-    def _resolve_init_std(
-        init_noise_std: float | Sequence[float] | torch.Tensor, num_actions: int
-    ) -> torch.Tensor:
+    def _resolve_init_std(init_noise_std: float | Sequence[float] | torch.Tensor, num_actions: int) -> torch.Tensor:
         init_std_tensor = torch.as_tensor(init_noise_std, dtype=torch.float32)
         if init_std_tensor.ndim == 0:
             return init_std_tensor.repeat(num_actions)
@@ -252,7 +248,9 @@ class PrivilegedTeacherActorCritic(nn.Module):
                 return int(sum(part.shape[-1] for part in obs_parts))
             if direct_key in observations:
                 return int(
-                    PrivilegedTeacherActorCritic._coerce_obs_value_to_tensor(observations[direct_key], direct_key).shape[-1]
+                    PrivilegedTeacherActorCritic._coerce_obs_value_to_tensor(
+                        observations[direct_key], direct_key
+                    ).shape[-1]
                 )
         raise TypeError(
             f"Unsupported observation specification for '{direct_key}' in PrivilegedTeacherActorCritic: "

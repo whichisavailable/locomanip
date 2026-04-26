@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2026 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import torch
@@ -151,10 +154,11 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
             ) from exc
         if len(foot_body_ids) != 4:
             raise RuntimeError(
-                "Go2Arm precise foot contact expected 4 articulation foot bodies, "
-                f"but found {len(foot_body_ids)}."
+                f"Go2Arm precise foot contact expected 4 articulation foot bodies, but found {len(foot_body_ids)}."
             )
-        missing_sensors = [sensor_name for sensor_name in mdp.GO2ARM_FOOT_SENSOR_NAMES if sensor_name not in self.scene.sensors]
+        missing_sensors = [
+            sensor_name for sensor_name in mdp.GO2ARM_FOOT_SENSOR_NAMES if sensor_name not in self.scene.sensors
+        ]
         if missing_sensors:
             raise RuntimeError(
                 "Go2Arm precise foot contact requires the four dedicated foot sensors, "
@@ -187,12 +191,20 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         self, episode_dict: dict[str, float | torch.Tensor], key: str, value: float | torch.Tensor, count: float = 1.0
     ) -> None:
         episode_dict[key] = self._as_log_tensor(value)
-        self._reward_log_sums[key] = self._reward_log_sums.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(value)
-        self._reward_log_counts[key] = self._reward_log_counts.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(count)
+        self._reward_log_sums[key] = self._reward_log_sums.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(
+            value
+        )
+        self._reward_log_counts[key] = self._reward_log_counts.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(
+            count
+        )
 
     def _accumulate_log_only(self, key: str, value: float, count: float = 1.0) -> None:
-        self._reward_log_sums[key] = self._reward_log_sums.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(value)
-        self._reward_log_counts[key] = self._reward_log_counts.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(count)
+        self._reward_log_sums[key] = self._reward_log_sums.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(
+            value
+        )
+        self._reward_log_counts[key] = self._reward_log_counts.get(key, self._as_log_tensor(0.0)) + self._as_log_tensor(
+            count
+        )
 
     def _accumulate_tensor_mean_log(
         self,
@@ -217,7 +229,9 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
     def _command_term(self, command_name: str = "ee_pose"):
         return self.command_manager.get_term(command_name)
 
-    def _classify_episode_bucket(self, sampled_target_pos_b: torch.Tensor, target_pos_w: torch.Tensor, command_cfg) -> str:
+    def _classify_episode_bucket(
+        self, sampled_target_pos_b: torch.Tensor, target_pos_w: torch.Tensor, command_cfg
+    ) -> str:
         x_tag = "x_near" if float(sampled_target_pos_b[0]) <= 0.5 else "x_far"
         z_world = float(target_pos_w[2])
         low_range = getattr(command_cfg, "secondary_world_z_range", None)
@@ -256,8 +270,8 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
             done_episode_lengths.sum().item(),
             count=float(done_episode_lengths.numel()),
         )
-        episode_dict["R/misc/terminal_episode_length"] = (
-            done_episode_lengths.sum() / float(done_episode_lengths.numel())
+        episode_dict["R/misc/terminal_episode_length"] = done_episode_lengths.sum() / float(
+            done_episode_lengths.numel()
         )
 
         command_cfg = self.cfg.commands.ee_pose
@@ -385,7 +399,9 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
                 return
             foot_contact_sensor: ContactSensor = self.scene.sensors[sensor_name]
             if foot_contact_sensor.data.force_matrix_w is not None:
-                filtered_force_vectors_per_foot.append(torch.sum(foot_contact_sensor.data.force_matrix_w[:, 0, :, :], dim=1))
+                filtered_force_vectors_per_foot.append(
+                    torch.sum(foot_contact_sensor.data.force_matrix_w[:, 0, :, :], dim=1)
+                )
             else:
                 filtered_force_vectors_per_foot.append(foot_contact_sensor.data.net_forces_w[:, 0, :])
 
@@ -527,9 +543,13 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
                 if name == "tracking_error":
                     continue
                 if name in self._GO2ARM_MANI_MASKED_TERMS:
-                    self._accumulate_tensor_mean_log(episode_dict, key, debug_terms[name], mask=gate_low_mask, write_episode=True)
+                    self._accumulate_tensor_mean_log(
+                        episode_dict, key, debug_terms[name], mask=gate_low_mask, write_episode=True
+                    )
                 elif name in self._GO2ARM_LOCO_MASKED_TERMS:
-                    self._accumulate_tensor_mean_log(episode_dict, key, debug_terms[name], mask=gate_high_mask, write_episode=True)
+                    self._accumulate_tensor_mean_log(
+                        episode_dict, key, debug_terms[name], mask=gate_high_mask, write_episode=True
+                    )
                 else:
                     self._accumulate_tensor_mean_log(episode_dict, key, debug_terms[name], write_episode=True)
 

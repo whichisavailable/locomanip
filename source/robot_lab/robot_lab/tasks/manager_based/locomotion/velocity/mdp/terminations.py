@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import torch
+
 from isaaclab.assets import RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor, RayCaster
@@ -198,7 +199,9 @@ def task_success_termination(
 
     base_lin_vel_ok = torch.linalg.norm(asset.data.root_lin_vel_b, dim=1) < base_lin_vel_threshold
     base_ang_vel_ok = torch.linalg.norm(asset.data.root_ang_vel_b, dim=1) < base_ang_vel_threshold
-    arm_joint_vel_ok = torch.max(torch.abs(asset.data.joint_vel[:, arm_joint_cfg.joint_ids]), dim=1)[0] < arm_joint_vel_threshold
+    arm_joint_vel_ok = (
+        torch.max(torch.abs(asset.data.joint_vel[:, arm_joint_cfg.joint_ids]), dim=1)[0] < arm_joint_vel_threshold
+    )
     ee_tracking_ok = command_term.tracking_error < ee_tracking_error_threshold
 
     success_mask = base_lin_vel_ok & base_ang_vel_ok & arm_joint_vel_ok & ee_tracking_ok

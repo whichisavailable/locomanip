@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2026 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
 # Copyright (c) 2024-2025 Ziqi Fan
 """
 Module for registering Gym environments for the Unitree Go2 Arm robot locomotion tasks.

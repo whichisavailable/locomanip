@@ -125,7 +125,11 @@ def _get_go2arm_ground_height_data(
         ray_hits_z = sensor.data.ray_hits_w[..., 2]
         ground_height_values.append(torch.mean(ray_hits_z, dim=1))
         valid_masks.append(
-            ~(torch.isnan(ray_hits_z).any(dim=1) | torch.isinf(ray_hits_z).any(dim=1) | (torch.max(torch.abs(ray_hits_z), dim=1)[0] > 1e6))
+            ~(
+                torch.isnan(ray_hits_z).any(dim=1)
+                | torch.isinf(ray_hits_z).any(dim=1)
+                | (torch.max(torch.abs(ray_hits_z), dim=1)[0] > 1e6)
+            )
         )
 
     ground_height_data = {
@@ -269,7 +273,9 @@ def _get_external_wrench_b(asset: Articulation) -> tuple[torch.Tensor, torch.Ten
     if force is not None and torque is not None:
         return force.to(asset.device), torque.to(asset.device)
 
-    zeros = torch.zeros((asset.num_instances, asset.num_bodies, 3), device=asset.device, dtype=asset.data.root_pos_w.dtype)
+    zeros = torch.zeros(
+        (asset.num_instances, asset.num_bodies, 3), device=asset.device, dtype=asset.data.root_pos_w.dtype
+    )
     return zeros, zeros
 
 
@@ -506,7 +512,9 @@ def command_term_cumulative_tracking_error(env: ManagerBasedEnv, command_name: s
     return command_term.cumulative_tracking_error.unsqueeze(-1)
 
 
-def trot_phase_sin(env: ManagerBasedRLEnv, cycle_time: float, phase_offsets: tuple[float, float, float, float]) -> torch.Tensor:
+def trot_phase_sin(
+    env: ManagerBasedRLEnv, cycle_time: float, phase_offsets: tuple[float, float, float, float]
+) -> torch.Tensor:
     """返回四个足端的 trot 相位正弦信号。"""
 
     # 如果环境还没准备好 episode 计数缓存，这里做一次兜底初始化。
@@ -550,6 +558,7 @@ def foot_heights_from_scanners(
     """返回每个足端相对地面的高度。"""
 
     asset: Articulation = env.scene[asset_cfg.name]
+    del asset
     foot_sphere_centers_w = _get_go2arm_foot_kinematics(env, asset_cfg)["foot_sphere_centers_w"]
 
     # 逐个足端扫描器读取地面高度，顺序与传入的 sensor_names 一致。
@@ -618,6 +627,7 @@ def feet_planar_velocities_w(
 
     # 读取机器人资产。
     asset: Articulation = env.scene[asset_cfg.name]
+    del asset
     # 用 foot 刚体和球心局部偏移恢复足端碰撞球心的世界系线速度。
     feet_lin_vel_w = _get_go2arm_foot_kinematics(env, asset_cfg)["foot_center_lin_vel_w"]
     num_envs = feet_lin_vel_w.shape[0]

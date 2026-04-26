@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -19,14 +20,15 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 from .observations import (
-    GO2ARM_FOOT_SPHERE_RADIUS,
     GO2ARM_FOOT_BODY_NAMES,
+    GO2ARM_FOOT_SPHERE_RADIUS,
     _get_go2arm_foot_kinematics,
     _go2arm_phase_offsets,
     get_go2arm_precise_foot_contact_forces,
     get_go2arm_precise_foot_contact_timers,
     get_go2arm_precise_foot_normal_forces,
 )
+
 
 def _ee_pose_command_term(env: ManagerBasedRLEnv, command_name: str):
     """Return the ee-pose command term used by go2arm."""
@@ -111,7 +113,6 @@ def _go2arm_trot_support_factor_from_contacts(
     return factor
 
 
-
 def _phi_quadratic(value: torch.Tensor, std: float) -> torch.Tensor:
     """Compute phi(v, std) = exp(-v^T v / std)."""
     if value.ndim > 1:
@@ -121,9 +122,8 @@ def _phi_quadratic(value: torch.Tensor, std: float) -> torch.Tensor:
     return torch.exp(-quad / std)
 
 
-def _sigmoid_gate(x: torch.Tensor, mu: float = 1.5, l: float = 1.0) -> torch.Tensor:
+def _sigmoid_gate(x: torch.Tensor, mu: float = 1.5, l: float = 1.0) -> torch.Tensor:  # noqa: E741
     """Compute the gating sigmoid D(x) with center mu and scale l."""
-    # 按你给定的定义，用 mu 做中心偏移，l 控制斜率，并令 k = 5 / l。
     if l <= 0.0:
         raise ValueError("l must be positive for the reward gating sigmoid.")
     k = 5.0 / l
@@ -206,7 +206,7 @@ def ee_cumulative_tracking_error_penalty(
     command_term = _ee_pose_command_term(env, command_name)
     # 按你的要求做上界截断，避免惩罚无界增长。
     penalty = torch.clamp(command_term.cumulative_tracking_error, min=0.0, max=clip_max)
- 
+
     return penalty
 
 
@@ -309,7 +309,9 @@ def support_feet_slide_penalty(
         contacts = precise_normal_forces > 1.0
     else:
         contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-        contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+        contacts = (
+            contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+        )
     # 用 foot 刚体和球心局部偏移恢复足端碰撞球心线速度。
     feet_lin_vel_w = _get_go2arm_foot_kinematics(env, asset_cfg)["foot_center_lin_vel_w"]
     # 只取世界系 xy 平面速度，作为地面切向滑动速度。
@@ -398,7 +400,9 @@ def moving_arm_default_deviation_penalty(
     asset: Articulation = env.scene[asset_cfg.name]
     # 用关节位置相对默认位姿的平方偏差作为惩罚，偏得越远惩罚越大。
     return torch.sum(
-        torch.square(asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]),
+        torch.square(
+            asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+        ),
         dim=1,
     )
 
@@ -409,7 +413,7 @@ def moving_arm_joint_velocity_penalty(
 ) -> torch.Tensor:
     """Penalty on arm joint velocity magnitude."""
     asset: Articulation = env.scene[asset_cfg.name]
-    # 杩欓噷鐩存帴鎯╃綒鏈烘鑷?joint velocity 鐨勫钩鏂瑰拰锛岀敤浜庢姂鍒?loco 闃舵涓轰簡琛ュ伩鏈鸿韩鑰屽嚭鐜扳€滆倶鍏宠妭涓婁笅鎽嗗姩鈥濈殑鍔ㄦ€佹憜鑷傘€?
+    # Penalize arm motion during locomotion to avoid rapid arm shaking.
     return torch.sum(torch.square(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
 
 
@@ -600,6 +604,7 @@ def feet_contact_soft_trot_reward(
     # 整体结构参考feet-contact reward，但期望接触 c_des 改成软权重。
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     asset: RigidObject = env.scene[asset_cfg.name]
+    del asset
 
     # 用 episode 时间构造步态相位，并给每只脚加各自的相位偏移。
     phase_t = env.episode_length_buf.to(torch.float32) * env.step_dt / cycle_time
@@ -649,9 +654,7 @@ def feet_contact_soft_trot_reward(
     # 站立期希望“脚落地且世界系水平速度小”，避免支撑脚打滑。
     contact_mask = force_z > contact_force_threshold
     in_contact = contact_mask.float()
-    vel_xy = torch.linalg.norm(
-        foot_kinematics["foot_center_lin_vel_w"][..., :2], dim=-1
-    )
+    vel_xy = torch.linalg.norm(foot_kinematics["foot_center_lin_vel_w"][..., :2], dim=-1)
     stance_term = c_des * in_contact * torch.exp(-(vel_xy**2) / vel_std)
 
     # 四只脚的摆动项和支撑项加总，作为整体步态奖励。
@@ -827,12 +830,8 @@ def _get_go2arm_touchdown_symmetry_components(
     rear_y = torch.square(state["last_touchdown_positions_b"][:, 2, 1] + state["last_touchdown_positions_b"][:, 3, 1])
 
     valid_pair_count = torch.clamp(pair_valid.float().sum(dim=1), min=1.0)
-    x_penalty = (
-        front_x * front_pair_valid.float() + rear_x * rear_pair_valid.float()
-    ) / valid_pair_count
-    y_penalty = (
-        front_y * front_pair_valid.float() + rear_y * rear_pair_valid.float()
-    ) / valid_pair_count
+    x_penalty = (front_x * front_pair_valid.float() + rear_x * rear_pair_valid.float()) / valid_pair_count
+    y_penalty = (front_y * front_pair_valid.float() + rear_y * rear_pair_valid.float()) / valid_pair_count
     no_valid_pair = ~(front_pair_valid | rear_pair_valid)
     x_penalty = torch.where(no_valid_pair, torch.zeros_like(x_penalty), x_penalty)
     y_penalty = torch.where(no_valid_pair, torch.zeros_like(y_penalty), y_penalty)
@@ -930,9 +929,12 @@ def mani_regularization_reward(
     """Manipulation regularization as exp(-weighted normalized penalties)."""
     # 这里只汇总 mani 内部已经确定的正则项，不包含 tracking / cumulative / potential 主项。
     support_roll = support_roll_penalty(env, asset_cfg=support_roll_asset_cfg) / support_roll_std
-    support_feet_slide = support_feet_slide_penalty(
-        env, sensor_cfg=support_feet_slide_sensor_cfg, asset_cfg=support_feet_slide_asset_cfg
-    ) / support_feet_slide_std
+    support_feet_slide = (
+        support_feet_slide_penalty(
+            env, sensor_cfg=support_feet_slide_sensor_cfg, asset_cfg=support_feet_slide_asset_cfg
+        )
+        / support_feet_slide_std
+    )
     support_foot_air = torch.clamp(
         support_foot_air_penalty(env, threshold=support_foot_air_threshold, sensor_cfg=support_foot_air_sensor_cfg),
         min=0.0,
@@ -958,15 +960,11 @@ def mani_regularization_reward(
         )
         / posture_deviation_std
     )
-    joint_limit_safety = joint_limit_safety_penalty(env, asset_cfg=joint_limit_safety_asset_cfg) / joint_limit_safety_std
-    support_left_right_x_symmetry = (
-        support_left_right_x_symmetry_penalty(env)
-        / support_left_right_x_symmetry_std
+    joint_limit_safety = (
+        joint_limit_safety_penalty(env, asset_cfg=joint_limit_safety_asset_cfg) / joint_limit_safety_std
     )
-    support_left_right_y_symmetry = (
-        support_left_right_y_symmetry_penalty(env)
-        / support_left_right_y_symmetry_std
-    )
+    support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(env) / support_left_right_x_symmetry_std
+    support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(env) / support_left_right_y_symmetry_std
     reward = (
         abs(support_roll_weight) * support_roll
         + abs(support_feet_slide_weight) * support_feet_slide
@@ -1180,8 +1178,10 @@ def loco_regularization_reward(
             )
             / leg_posture_deviation_std
         )
-        + abs(touchdown_left_right_x_symmetry_weight) * (touchdown_left_right_x_symmetry_penalty(env) / touchdown_left_right_x_symmetry_std)
-        + abs(touchdown_left_right_y_symmetry_weight) * (touchdown_left_right_y_symmetry_penalty(env) / touchdown_left_right_y_symmetry_std)
+        + abs(touchdown_left_right_x_symmetry_weight)
+        * (touchdown_left_right_x_symmetry_penalty(env) / touchdown_left_right_x_symmetry_std)
+        + abs(touchdown_left_right_y_symmetry_weight)
+        * (touchdown_left_right_y_symmetry_penalty(env) / touchdown_left_right_y_symmetry_std)
         + abs(touchdown_foot_y_distance_weight)
         * (
             touchdown_foot_y_distance_penalty(env, min_distance=touchdown_foot_y_distance_min_distance)
@@ -1354,6 +1354,7 @@ def joint_power_penalty(
     power_norm = torch.sum(torch.abs(joint_power), dim=1)
     return power_norm
 
+
 def basic_reward(
     env: ManagerBasedRLEnv,
     is_alive_weight: float,
@@ -1383,7 +1384,6 @@ def basic_reward(
     return reward
 
 
-
 def _compute_go2arm_reward_terms(
     env: ManagerBasedRLEnv,
     total_reward_term_name: str = "total_reward",
@@ -1402,6 +1402,7 @@ def _compute_go2arm_reward_terms(
     cumulative_tracking_error = command_term.cumulative_tracking_error.clone()
     ee_pos_b = command_term.ee_pos_b.clone()
     target_pos_b = command_term.target_pos_b.clone()
+    del ee_pos_b, target_pos_b
     # -----------------------------
     # 2) gate：直接用冻结后的 reference_tracking_error
     # -----------------------------
@@ -1417,9 +1418,7 @@ def _compute_go2arm_reward_terms(
     ee_position_enhanced = ee_position_raw + torch.pow(ee_position_raw, params["mani_position_power"])
 
     ee_orientation_raw = torch.exp(-orientation_tracking_error / params["mani_orientation_std"])
-    ee_orientation_enhanced = ee_orientation_raw + torch.pow(
-        ee_orientation_raw, params["mani_orientation_power"]
-    )
+    ee_orientation_enhanced = ee_orientation_raw + torch.pow(ee_orientation_raw, params["mani_orientation_power"])
 
     # -----------------------------
     # 4) mani regularization：先按各惩罚子项线性组合，再映射成 (0, 1] 的正则因子
@@ -1510,7 +1509,9 @@ def _compute_go2arm_reward_terms(
         min=0.0,
         max=params["mani_regularization_support_foot_air_clip_max"],
     )
-    support_non_foot_contact_weighted = abs(params["mani_regularization_support_non_foot_contact_weight"]) * torch.clamp(
+    support_non_foot_contact_weighted = abs(
+        params["mani_regularization_support_non_foot_contact_weight"]
+    ) * torch.clamp(
         support_non_foot_contact,
         min=0.0,
         max=params["mani_regularization_support_non_foot_contact_clip_max"],
@@ -1566,8 +1567,7 @@ def _compute_go2arm_reward_terms(
     workspace_position_penalty_weighted = -abs(params["workspace_position_weight"]) * workspace_position_penalty
 
     mani_total = (
-        mani_regularization
-        * (1.0 + ee_position_enhanced + ee_position_raw * ee_orientation_enhanced)
+        mani_regularization * (1.0 + ee_position_enhanced + ee_position_raw * ee_orientation_enhanced)
         + ee_tracking_potential_weighted
         + ee_cumulative_penalty_weighted
     )
@@ -1668,12 +1668,8 @@ def _compute_go2arm_reward_terms(
         env,
         sensor_cfg=params["loco_regularization_diagonal_foot_symmetry_sensor_cfg"],
     )
-    moving_arm_deviation = moving_arm_default_deviation_penalty(
-        env, asset_cfg=params["loco_arm_swing_asset_cfg"]
-    )
-    moving_arm_dynamic = moving_arm_joint_velocity_penalty(
-        env, asset_cfg=params["loco_arm_dynamic_asset_cfg"]
-    )
+    moving_arm_deviation = moving_arm_default_deviation_penalty(env, asset_cfg=params["loco_arm_swing_asset_cfg"])
+    moving_arm_dynamic = moving_arm_joint_velocity_penalty(env, asset_cfg=params["loco_arm_dynamic_asset_cfg"])
     base_height_weighted = abs(params["loco_regularization_base_height_weight"]) * base_height
     base_roll_weighted = abs(params["loco_regularization_base_roll_weight"]) * base_roll
     base_pitch_weighted = abs(params["loco_regularization_base_pitch_weight"]) * base_pitch
@@ -1684,15 +1680,13 @@ def _compute_go2arm_reward_terms(
     leg_posture_deviation_weighted = abs(params["loco_regularization_leg_posture_deviation_weight"]) * (
         leg_posture_deviation / params["loco_regularization_leg_posture_deviation_std"]
     )
-    touchdown_left_right_x_symmetry_weighted = abs(params["loco_regularization_touchdown_left_right_x_symmetry_weight"]) * (
-        touchdown_left_right_x_symmetry / params["loco_regularization_touchdown_left_right_x_symmetry_std"]
-    )
-    touchdown_left_right_y_symmetry_weighted = abs(params["loco_regularization_touchdown_left_right_y_symmetry_weight"]) * (
-        touchdown_left_right_y_symmetry / params["loco_regularization_touchdown_left_right_y_symmetry_std"]
-    )
-    touchdown_foot_y_distance_weighted = abs(
-        params["loco_regularization_touchdown_foot_y_distance_weight"]
-    ) * (
+    touchdown_left_right_x_symmetry_weighted = abs(
+        params["loco_regularization_touchdown_left_right_x_symmetry_weight"]
+    ) * (touchdown_left_right_x_symmetry / params["loco_regularization_touchdown_left_right_x_symmetry_std"])
+    touchdown_left_right_y_symmetry_weighted = abs(
+        params["loco_regularization_touchdown_left_right_y_symmetry_weight"]
+    ) * (touchdown_left_right_y_symmetry / params["loco_regularization_touchdown_left_right_y_symmetry_std"])
+    touchdown_foot_y_distance_weighted = abs(params["loco_regularization_touchdown_foot_y_distance_weight"]) * (
         touchdown_foot_y_distance / params["loco_regularization_touchdown_foot_y_distance_std"]
     )
     diagonal_foot_symmetry_weighted = abs(params["loco_regularization_diagonal_foot_symmetry_weight"]) * (
@@ -1716,9 +1710,7 @@ def _compute_go2arm_reward_terms(
     )
     loco_regularization = torch.exp(-loco_regularization_base_raw) * feet_contact_soft_trot_factor
     loco_total = (
-        loco_regularization * (1.0 + locomotion_tracking)
-        - moving_arm_deviation_weighted
-        - moving_arm_dynamic_weighted
+        loco_regularization * (1.0 + locomotion_tracking) - moving_arm_deviation_weighted - moving_arm_dynamic_weighted
     )
 
     # -----------------------------
@@ -2117,6 +2109,7 @@ def go2arm_reward_debug_terms(
     if cache is not None and cache_term_name == total_reward_term_name:
         return cache
     return _compute_go2arm_reward_terms(env, total_reward_term_name=total_reward_term_name)
+
 
 def track_lin_vel_xy_exp(
     env: ManagerBasedRLEnv, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")

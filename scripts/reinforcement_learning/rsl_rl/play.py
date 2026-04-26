@@ -73,8 +73,8 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import os
 import math
+import os
 import time
 
 import gymnasium as gym
@@ -240,7 +240,9 @@ def _format_go2arm_tracking_debug_lines(env) -> list[str]:
             global_force_z_text = " ".join(
                 f"{leg}={value.item():+.2f}" for leg, value in zip(leg_names, global_force_z)
             )
-            lines.append(f"[GLOBAL FOOT FORCE Z env0] {global_force_z_text} sum={torch.sum(global_force_z).item():+.2f}")
+            lines.append(
+                f"[GLOBAL FOOT FORCE Z env0] {global_force_z_text} sum={torch.sum(global_force_z).item():+.2f}"
+            )
             all_body_force_norm = torch.linalg.norm(global_sensor.data.net_forces_w[0], dim=-1)
             top_count = min(8, all_body_force_norm.numel())
             top_values, top_ids = torch.topk(all_body_force_norm, k=top_count)
@@ -255,9 +257,10 @@ def _format_go2arm_tracking_debug_lines(env) -> list[str]:
                 non_foot_forces = all_body_force_norm[torch.as_tensor(non_foot_ids, device=all_body_force_norm.device)]
                 non_foot_top_value, non_foot_top_pos = torch.max(non_foot_forces, dim=0)
                 non_foot_top_id = non_foot_ids[int(non_foot_top_pos.item())]
+                non_foot_top_name = global_sensor.body_names[non_foot_top_id]
                 lines.append(
                     "[GLOBAL TOP BODY FORCE env0] "
-                    f"{top_body_text}; max_non_foot={global_sensor.body_names[non_foot_top_id]}:{non_foot_top_value.item():.2f}"
+                    f"{top_body_text}; max_non_foot={non_foot_top_name}:{non_foot_top_value.item():.2f}"
                 )
 
         joint_vel = robot.data.joint_vel[0, joint_ids].reshape(len(leg_names), 3)
@@ -341,8 +344,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     ee_yaw_b,
                 )
             print(
-                "[INFO] Go2Arm fixed ee command override: "
-                f"pos={args_cli.go2arm_ee_pos}, rpy={args_cli.go2arm_ee_rpy}"
+                f"[INFO] Go2Arm fixed ee command override: pos={args_cli.go2arm_ee_pos}, rpy={args_cli.go2arm_ee_rpy}"
             )
             env_cfg.commands.ee_pose.sample_z_in_world_frame = True
             env_cfg.commands.ee_pose.reject_position_cuboid = None
