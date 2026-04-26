@@ -1,2 +1,0 @@
-[INFO][AppLauncher]: Using device: cuda:0
-[INFO][AppLauncher]: Loading experience file: /home/dell/IsaacLab/apps/isaacsim_4_5/isaaclab.python.headless.kit

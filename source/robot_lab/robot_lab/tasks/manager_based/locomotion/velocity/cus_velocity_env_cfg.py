@@ -76,12 +76,7 @@ GO2ARM_BASE_BODY_NAME = "base_link"
 # 四个足端 body 名称。
 GO2ARM_FOOT_BODY_NAMES = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 GO2ARM_FOOT_NAMES = list(GO2ARM_FOOT_BODY_NAMES)
-GO2ARM_CONTACT_SENSOR_PRIM_PATH = (
-    "{ENV_REGEX_NS}/Robot/.*(?:"
-    "FL_foot|FR_foot|RL_foot|RR_foot|"
-    "link[1-6]"
-    ")$"
-)
+GO2ARM_CONTACT_SENSOR_PRIM_PATH = "{ENV_REGEX_NS}/Robot/.*"
 # 非法接触检测需要看到全身所有 body，具体哪些 patch 合法由底层逐 patch 聚合逻辑再细分。
 GO2ARM_NON_FOOT_BODY_REGEX = [r"^(?!.*(?:FL_foot|FR_foot|RL_foot|RR_foot)$).+"]
 # 预设 trot 步态偏置。

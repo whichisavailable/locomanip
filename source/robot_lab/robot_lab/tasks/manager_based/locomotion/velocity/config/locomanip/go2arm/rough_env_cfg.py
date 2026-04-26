@@ -389,12 +389,12 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # 适度提高步态接触规律权重，让四个足端的接触分布更稳定。
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_weight"] = 0.5
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_force_std"] = 1.0
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_height_std"] = 0.05
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_height_std"] = 0.0025
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_vel_std"] = 0.01
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.25
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_phase_offsets"] = GO2ARM_TROT_PHASE_OFFSETS
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_swing_height"] = 0.05
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 1.5
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_swing_height"] = 0.10
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 2.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"] = 2.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_support_factor_low"] = 0.5
         self.rewards.total_reward.params["loco_tracking_std"] = 0.5
