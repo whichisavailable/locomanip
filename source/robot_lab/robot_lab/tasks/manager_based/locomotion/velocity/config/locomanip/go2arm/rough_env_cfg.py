@@ -413,8 +413,8 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["basic_collision_force_scale"] = 20.0
         self.rewards.total_reward.params["basic_action_smoothness_first_weight"] = -0.005
         self.rewards.total_reward.params["basic_action_smoothness_second_weight"] = -0.0015
-        self.rewards.total_reward.params["basic_joint_torque_sq_weight"] = -4.0e-5
-        self.rewards.total_reward.params["basic_joint_power_weight"] = -3.3e-4
+        self.rewards.total_reward.params["basic_joint_torque_sq_weight"] = -1.6e-3
+        self.rewards.total_reward.params["basic_joint_power_weight"] = -1.32e-2
 
         # Do not drop zero-weight rewards here.
         # total_reward still needs ee_tracking_potential as an internal stateful term.

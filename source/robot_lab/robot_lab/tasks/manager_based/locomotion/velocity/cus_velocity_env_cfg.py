@@ -913,10 +913,12 @@ class RewardsCfg:
             "basic_joint_torque_sq_weight": 0.0,
             # 关节力矩平方和惩罚读取的关节集合。
             "basic_joint_torque_sq_asset_cfg": SceneEntityCfg("robot", joint_names=GO2ARM_ALL_JOINT_NAMES),
+            "basic_joint_torque_sq_normalize_by_effort_limit": True,
             # 关节功率惩罚权重。
             "basic_joint_power_weight": 0.0,
             # 关节功率惩罚读取的关节集合。
             "basic_joint_power_asset_cfg": SceneEntityCfg("robot", joint_names=GO2ARM_ALL_JOINT_NAMES),
+            "basic_joint_power_normalize_by_effort_limit": True,
         },
     )
     # 保留有状态势奖励项，供 total_reward 复用上一时刻缓存。
@@ -1014,9 +1016,9 @@ class TerminationsCfg:
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
             # Terminate only on sustained single-joint torque saturation.
-            "soft_max_ratio": 1.0,
-            "hard_max_ratio": 1.5,
-            "consecutive_steps": 12,
+            "soft_max_ratio": 1.2,
+            "hard_max_ratio": 2.0,
+            "consecutive_steps": 6,
         },
     )
     # 成功终止：基座和机械臂速度都很小，且末端跟踪误差足够小。

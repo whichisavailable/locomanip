@@ -1369,23 +1369,67 @@ def loco_reward(
     return regularization_reward * (1.0 + tracking_reward) - arm_swing_penalty - arm_dynamic_penalty
 
 
+def _actuator_effort_limits(
+    env: ManagerBasedRLEnv,
+    asset: Articulation,
+    joint_ids: list[int] | slice,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Return actuator effort limits for selected joints."""
+
+    effort_limits = torch.full_like(asset.data.computed_torque, torch.inf)
+    for actuator in asset.actuators.values():
+        actuator_joint_ids = torch.as_tensor(actuator.joint_indices, device=env.device, dtype=torch.long)
+        actuator_effort_limit = actuator.effort_limit
+        if not isinstance(actuator_effort_limit, torch.Tensor):
+            actuator_effort_limit = torch.full(
+                (env.num_envs, actuator_joint_ids.numel()),
+                float(actuator_effort_limit),
+                device=env.device,
+                dtype=dtype,
+            )
+        else:
+            actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=dtype)
+            if actuator_effort_limit.dim() == 0:
+                actuator_effort_limit = actuator_effort_limit.reshape(1, 1).expand(
+                    env.num_envs, actuator_joint_ids.numel()
+                )
+            elif actuator_effort_limit.dim() == 1:
+                actuator_effort_limit = actuator_effort_limit.unsqueeze(0).expand(env.num_envs, -1)
+        effort_limits[:, actuator_joint_ids] = actuator_effort_limit
+
+    return torch.clamp(effort_limits[:, joint_ids], min=1.0e-6)
+
+
 def joint_torque_sq_penalty(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    normalize_by_effort_limit: bool = False,
 ) -> torch.Tensor:
     """Penalty on the sum of squared joint torques."""
     asset: Articulation = env.scene[asset_cfg.name]
-    torque_sq = torch.sum(torch.square(asset.data.applied_torque[:, asset_cfg.joint_ids]), dim=1)
+    if normalize_by_effort_limit:
+        torque = asset.data.computed_torque[:, asset_cfg.joint_ids]
+        effort_limits = _actuator_effort_limits(env, asset, asset_cfg.joint_ids, dtype=torque.dtype)
+        torque = torque / effort_limits
+    else:
+        torque = asset.data.applied_torque[:, asset_cfg.joint_ids]
+    torque_sq = torch.sum(torch.square(torque), dim=1)
     return torque_sq
 
 
 def joint_power_penalty(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    normalize_by_effort_limit: bool = False,
 ) -> torch.Tensor:
     """Penalty on the sum of absolute joint power."""
     asset: Articulation = env.scene[asset_cfg.name]
-    joint_power = asset.data.applied_torque[:, asset_cfg.joint_ids] * asset.data.joint_vel[:, asset_cfg.joint_ids]
+    torque = asset.data.applied_torque[:, asset_cfg.joint_ids]
+    if normalize_by_effort_limit:
+        effort_limits = _actuator_effort_limits(env, asset, asset_cfg.joint_ids, dtype=torque.dtype)
+        torque = torque / effort_limits
+    joint_power = torque * asset.data.joint_vel[:, asset_cfg.joint_ids]
     power_norm = torch.sum(torch.abs(joint_power), dim=1)
     return power_norm
 
@@ -1402,6 +1446,8 @@ def basic_reward(
     joint_torque_sq_asset_cfg: SceneEntityCfg,
     joint_power_weight: float,
     joint_power_asset_cfg: SceneEntityCfg,
+    joint_torque_sq_normalize_by_effort_limit: bool = False,
+    joint_power_normalize_by_effort_limit: bool = False,
 ) -> torch.Tensor:
     """Weighted sum of basic reward terms."""
     # basic 奖励目前按你说的方式，直接做各子项加权求和。
@@ -1414,8 +1460,16 @@ def basic_reward(
     )
     reward += action_smoothness_first_weight * action_smoothness_first_penalty(env)
     reward += action_smoothness_second_weight * action_smoothness_second_penalty(env)
-    reward += joint_torque_sq_weight * joint_torque_sq_penalty(env, asset_cfg=joint_torque_sq_asset_cfg)
-    reward += joint_power_weight * joint_power_penalty(env, asset_cfg=joint_power_asset_cfg)
+    reward += joint_torque_sq_weight * joint_torque_sq_penalty(
+        env,
+        asset_cfg=joint_torque_sq_asset_cfg,
+        normalize_by_effort_limit=joint_torque_sq_normalize_by_effort_limit,
+    )
+    reward += joint_power_weight * joint_power_penalty(
+        env,
+        asset_cfg=joint_power_asset_cfg,
+        normalize_by_effort_limit=joint_power_normalize_by_effort_limit,
+    )
     return reward
 
 
@@ -1773,10 +1827,12 @@ def _compute_go2arm_reward_terms(
     basic_joint_torque_sq = joint_torque_sq_penalty(
         env,
         asset_cfg=params["basic_joint_torque_sq_asset_cfg"],
+        normalize_by_effort_limit=params.get("basic_joint_torque_sq_normalize_by_effort_limit", False),
     )
     basic_joint_power = joint_power_penalty(
         env,
         asset_cfg=params["basic_joint_power_asset_cfg"],
+        normalize_by_effort_limit=params.get("basic_joint_power_normalize_by_effort_limit", False),
     )
     basic_is_alive_weighted = params["basic_is_alive_weight"] * basic_is_alive
     basic_collision_weighted = params["basic_collision_weight"] * basic_collision
@@ -2002,8 +2058,10 @@ def total_reward(
     basic_action_smoothness_second_weight: object = None,
     basic_joint_torque_sq_weight: object = None,
     basic_joint_torque_sq_asset_cfg: object = None,
+    basic_joint_torque_sq_normalize_by_effort_limit: object = None,
     basic_joint_power_weight: object = None,
     basic_joint_power_asset_cfg: object = None,
+    basic_joint_power_normalize_by_effort_limit: object = None,
 ) -> torch.Tensor:
     """Compute total reward as (1-D)*mani + D*loco + basic."""
     _ = (
@@ -2140,8 +2198,10 @@ def total_reward(
         basic_action_smoothness_second_weight,
         basic_joint_torque_sq_weight,
         basic_joint_torque_sq_asset_cfg,
+        basic_joint_torque_sq_normalize_by_effort_limit,
         basic_joint_power_weight,
         basic_joint_power_asset_cfg,
+        basic_joint_power_normalize_by_effort_limit,
     )
     cache = _compute_go2arm_reward_terms(env)
     return cache["total_reward_debug"]
