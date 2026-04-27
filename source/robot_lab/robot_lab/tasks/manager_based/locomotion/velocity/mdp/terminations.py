@@ -164,15 +164,15 @@ def joint_velocity_termination(
 def joint_torque_termination(
     env,
     soft_max_ratio: float,
-    hard_max_ratio: float,
+    hard_max_ratio: float | None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     consecutive_steps: int = 3,
 ) -> torch.Tensor:
-    """Terminate on sustained single-joint torque saturation."""
+    """Terminate on sustained single-joint actuator torque clipping."""
 
     asset = env.scene[asset_cfg.name]
     joint_ids = asset_cfg.joint_ids
-    computed_torque = torch.abs(asset.data.computed_torque[:, joint_ids])
+    torque_dtype = asset.data.computed_torque.dtype
 
     effort_limits = torch.full_like(asset.data.computed_torque, torch.inf)
     for actuator in asset.actuators.values():
@@ -183,10 +183,10 @@ def joint_torque_termination(
                 (env.num_envs, actuator_joint_ids.numel()),
                 float(actuator_effort_limit),
                 device=env.device,
-                dtype=computed_torque.dtype,
+                dtype=torque_dtype,
             )
         else:
-            actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=computed_torque.dtype)
+            actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=torque_dtype)
             if actuator_effort_limit.dim() == 0:
                 actuator_effort_limit = actuator_effort_limit.reshape(1, 1).expand(
                     env.num_envs, actuator_joint_ids.numel()
@@ -196,10 +196,17 @@ def joint_torque_termination(
         effort_limits[:, actuator_joint_ids] = actuator_effort_limit
 
     selected_effort_limits = torch.clamp(effort_limits[:, joint_ids], min=1.0e-6)
-    max_torque_ratio = torch.max(computed_torque / selected_effort_limits, dim=1)[0]
+    torque_clipping = torch.abs(
+        asset.data.computed_torque[:, joint_ids] - asset.data.applied_torque[:, joint_ids]
+    )
+    max_torque_clipping_ratio = torch.max(torque_clipping / selected_effort_limits, dim=1)[0]
 
-    hard_violation = max_torque_ratio > hard_max_ratio
-    soft_violation = max_torque_ratio > soft_max_ratio
+    hard_violation = (
+        max_torque_clipping_ratio > hard_max_ratio
+        if hard_max_ratio is not None
+        else torch.zeros_like(max_torque_clipping_ratio, dtype=torch.bool)
+    )
+    soft_violation = max_torque_clipping_ratio > soft_max_ratio
     return hard_violation | _persistent_violation(
         env=env,
         violation_mask=soft_violation,

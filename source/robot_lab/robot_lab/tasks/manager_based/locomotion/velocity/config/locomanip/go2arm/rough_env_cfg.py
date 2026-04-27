@@ -328,7 +328,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_lin_speed"] = 0.08
         self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_ang_speed"] = 0.25
         self.rewards.total_reward.params["mani_cumulative_error_clip_max"] = 20.0
-        self.rewards.total_reward.params["workspace_position_weight"] = 1.0
+        self.rewards.total_reward.params["workspace_position_weight"] = 2.9
         self.rewards.total_reward.params["workspace_position_x_min"] = 0.25
         self.rewards.total_reward.params["workspace_position_x_max"] = 0.35
         self.rewards.total_reward.params["workspace_position_y_weight"] = 0.2

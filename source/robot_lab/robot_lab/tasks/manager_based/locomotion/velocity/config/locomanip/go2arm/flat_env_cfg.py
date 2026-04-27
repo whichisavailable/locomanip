@@ -41,6 +41,7 @@ class UnitreeGo2ArmFlatEnvCfg(UnitreeGo2ArmRoughEnvCfg):
         self.observations.privileged.foot_heights.params = {
             "asset_cfg": SceneEntityCfg("robot", body_names=GO2ARM_FOOT_BODY_NAMES)
         }
+        self.rewards.total_reward.params["mani_regularization_min_base_height_sensor_cfg"] = None
         self.rewards.total_reward.params["loco_regularization_base_height_sensor_cfg"] = None
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_ground_sensor_names"] = None
         self.terminations.base_height_termination.params["sensor_cfg"] = None

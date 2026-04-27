@@ -1015,9 +1015,10 @@ class TerminationsCfg:
         func=mdp.joint_torque_termination,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            # Terminate only on sustained single-joint torque saturation.
-            "soft_max_ratio": 1.2,
-            "hard_max_ratio": 2.0,
+            # Terminate only on sustained single-joint torque clipping:
+            # abs(computed_torque - applied_torque) / effort_limit.
+            "soft_max_ratio": 0.8,
+            "hard_max_ratio": None,
             "consecutive_steps": 6,
         },
     )

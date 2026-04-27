@@ -3,11 +3,17 @@
 
 from isaaclab.utils import configclass
 
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from isaaclab_rl.rsl_rl import (
+    RslRlOnPolicyRunnerCfg,
+    RslRlPpoActorCriticCfg,
+    RslRlPpoAlgorithmCfg,
+    RslRlSymmetryCfg,
+)
 
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.rough_env_cfg import (
     UnitreeGo2ArmRoughEnvCfg,
 )
+from robot_lab.tasks.manager_based.locomotion.velocity.mdp.symmetry import go2arm
 
 
 def _resolve_init_noise_std(*, allow_vector: bool) -> float | tuple[float, ...]:
@@ -113,3 +119,28 @@ class UnitreeGo2ArmFlatPPORunnerCfg(UnitreeGo2ArmTeacherRoughPPORunnerCfg):
         super().__post_init__()
         self.max_iterations = 10000
         self.experiment_name = "unitree_go2arm_teacher_flat"
+
+
+@configclass
+class UnitreeGo2ArmFlatPPORunnerWithSymmetryCfg(UnitreeGo2ArmFlatPPORunnerCfg):
+    """Flat Go2Arm PPO config with world-XZ mirror data augmentation."""
+
+    algorithm = RslRlPpoAlgorithmCfg(
+        value_loss_coef=1.0,
+        use_clipped_value_loss=True,
+        clip_param=0.2,
+        entropy_coef=0.002,
+        num_learning_epochs=8,
+        num_mini_batches=4,
+        learning_rate=3.0e-4,
+        schedule="adaptive",
+        gamma=0.99,
+        lam=0.95,
+        desired_kl=0.01,
+        max_grad_norm=1.0,
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            use_mirror_loss=False,
+            data_augmentation_func=go2arm.compute_symmetric_states,
+        ),
+    )
