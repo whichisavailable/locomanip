@@ -325,13 +325,15 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["mani_regularization_support_left_right_x_symmetry_std"] = 0.04
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_weight"] = 0.08
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_std"] = 0.03
+        self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_lin_speed"] = 0.08
+        self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_ang_speed"] = 0.25
         self.rewards.total_reward.params["mani_cumulative_error_clip_max"] = 20.0
-        self.rewards.total_reward.params["workspace_position_weight"] = 0.8
+        self.rewards.total_reward.params["workspace_position_weight"] = 1.0
         self.rewards.total_reward.params["workspace_position_x_min"] = 0.25
         self.rewards.total_reward.params["workspace_position_x_max"] = 0.35
         self.rewards.total_reward.params["workspace_position_y_weight"] = 0.2
-        self.rewards.total_reward.params["workspace_position_std"] = 1.0
-        self.rewards.total_reward.params["workspace_position_clip_max"] = 1.0
+        self.rewards.total_reward.params["workspace_position_std"] = 0.5
+        self.rewards.total_reward.params["workspace_position_clip_max"] = 1.5
         # 继续保留轻度高度约束，但当前主要问题更偏向前倾和竖直速度，因此高度项不额外拉太高。
         self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.03
         self.rewards.total_reward.params["loco_regularization_base_height_std"] = 0.05
@@ -385,16 +387,16 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_sensor_cfg"]
         )
         # 适度提高步态接触规律权重，让四个足端的接触分布更稳定。
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_weight"] = 0.5
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_weight"] = 0.8
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_force_std"] = 1.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_height_std"] = 0.0025
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_vel_std"] = 0.01
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.25
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.40
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_phase_offsets"] = (
             GO2ARM_TROT_PHASE_OFFSETS
         )
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_swing_height"] = 0.10
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 2.0
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 6.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"] = 2.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_support_factor_low"] = 0.5
         self.rewards.total_reward.params["loco_tracking_std"] = 0.5
@@ -421,8 +423,8 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Any non-foot contact contributes to illegal-contact termination.
         self.terminations.non_foot_contact_termination.params["sensor_cfg"].body_names = non_foot_contact_body_regex
         self.terminations.base_orientation_termination.params["asset_cfg"].body_names = [self.base_link_name]
-        self.terminations.base_orientation_termination.params["soft_roll_pitch_limit"] = 0.40
-        self.terminations.base_orientation_termination.params["hard_roll_pitch_limit"] = 0.50
+        self.terminations.base_orientation_termination.params["soft_roll_pitch_limit"] = 0.20
+        self.terminations.base_orientation_termination.params["hard_roll_pitch_limit"] = 0.35
         self.terminations.base_orientation_termination.params["consecutive_steps"] = 5
         self.terminations.base_height_termination.params["asset_cfg"].body_names = [self.base_link_name]
         # 当前主要 termination 已经从力矩切换为 base_height，先略微放宽高度边界，避免过早截断稳定化学习。

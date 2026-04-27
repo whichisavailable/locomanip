@@ -753,6 +753,27 @@ def _get_go2arm_foot_contact_mask(env: ManagerBasedRLEnv, contact_force_threshol
     )
 
 
+def _get_go2arm_stable_support_mask(
+    env: ManagerBasedRLEnv,
+    in_contact: torch.Tensor,
+    max_base_lin_speed: float | None = None,
+    max_base_ang_speed: float | None = None,
+) -> torch.Tensor:
+    """Return environments where all feet are in contact and the base is nearly stationary."""
+    support_mask = torch.all(in_contact, dim=1)
+    if max_base_lin_speed is None and max_base_ang_speed is None:
+        return support_mask
+
+    asset: Articulation = env.scene["robot"]
+    if max_base_lin_speed is not None:
+        base_lin_speed_xy = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+        support_mask = support_mask & (base_lin_speed_xy < float(max_base_lin_speed))
+    if max_base_ang_speed is not None:
+        base_yaw_speed = torch.abs(asset.data.root_ang_vel_b[:, 2])
+        support_mask = support_mask & (base_yaw_speed < float(max_base_ang_speed))
+    return support_mask
+
+
 def _compute_go2arm_left_right_symmetry_components(foot_positions_b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute front/rear left-right symmetry penalties on x and y separately."""
     x_symmetry = 0.5 * (
@@ -847,25 +868,39 @@ def _get_go2arm_touchdown_symmetry_components(
 
 def support_left_right_x_symmetry_penalty(
     env: ManagerBasedRLEnv,
+    max_base_lin_speed: float | None = None,
+    max_base_ang_speed: float | None = None,
 ) -> torch.Tensor:
     """Penalty on left-right x symmetry while all four feet are stably supporting."""
     asset_cfg = _get_go2arm_default_foot_asset_cfg(env)
     foot_positions_b = _get_go2arm_foot_centers_b(env, asset_cfg)
     x_symmetry, _ = _compute_go2arm_left_right_symmetry_components(foot_positions_b)
     in_contact = _get_go2arm_foot_contact_mask(env, contact_force_threshold=1.0)
-    support_mask = torch.all(in_contact, dim=1)
+    support_mask = _get_go2arm_stable_support_mask(
+        env,
+        in_contact,
+        max_base_lin_speed=max_base_lin_speed,
+        max_base_ang_speed=max_base_ang_speed,
+    )
     return x_symmetry * support_mask.float()
 
 
 def support_left_right_y_symmetry_penalty(
     env: ManagerBasedRLEnv,
+    max_base_lin_speed: float | None = None,
+    max_base_ang_speed: float | None = None,
 ) -> torch.Tensor:
     """Penalty on left-right y mirror symmetry while all four feet are stably supporting."""
     asset_cfg = _get_go2arm_default_foot_asset_cfg(env)
     foot_positions_b = _get_go2arm_foot_centers_b(env, asset_cfg)
     _, y_symmetry = _compute_go2arm_left_right_symmetry_components(foot_positions_b)
     in_contact = _get_go2arm_foot_contact_mask(env, contact_force_threshold=1.0)
-    support_mask = torch.all(in_contact, dim=1)
+    support_mask = _get_go2arm_stable_support_mask(
+        env,
+        in_contact,
+        max_base_lin_speed=max_base_lin_speed,
+        max_base_ang_speed=max_base_ang_speed,
+    )
     return y_symmetry * support_mask.float()
 
 
@@ -1463,8 +1498,16 @@ def _compute_go2arm_reward_terms(
     joint_limit_safety = joint_limit_safety_penalty(
         env, asset_cfg=params["mani_regularization_joint_limit_safety_asset_cfg"]
     )
-    support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(env)
-    support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(env)
+    support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(
+        env,
+        max_base_lin_speed=params.get("mani_regularization_support_symmetry_max_base_lin_speed"),
+        max_base_ang_speed=params.get("mani_regularization_support_symmetry_max_base_ang_speed"),
+    )
+    support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(
+        env,
+        max_base_lin_speed=params.get("mani_regularization_support_symmetry_max_base_lin_speed"),
+        max_base_ang_speed=params.get("mani_regularization_support_symmetry_max_base_ang_speed"),
+    )
     mani_regularization_raw = (
         abs(params["mani_regularization_support_roll_weight"])
         * (support_roll / params["mani_regularization_support_roll_std"])
@@ -1876,6 +1919,8 @@ def total_reward(
     mani_regularization_support_left_right_x_symmetry_std: object = None,
     mani_regularization_support_left_right_y_symmetry_weight: object = None,
     mani_regularization_support_left_right_y_symmetry_std: object = None,
+    mani_regularization_support_symmetry_max_base_lin_speed: object = None,
+    mani_regularization_support_symmetry_max_base_ang_speed: object = None,
     mani_potential_command_name: object = None,
     mani_potential_std: object = None,
     mani_potential_weight: object = None,
@@ -2012,6 +2057,8 @@ def total_reward(
         mani_regularization_support_left_right_x_symmetry_std,
         mani_regularization_support_left_right_y_symmetry_weight,
         mani_regularization_support_left_right_y_symmetry_std,
+        mani_regularization_support_symmetry_max_base_lin_speed,
+        mani_regularization_support_symmetry_max_base_ang_speed,
         mani_potential_command_name,
         mani_potential_std,
         mani_potential_weight,

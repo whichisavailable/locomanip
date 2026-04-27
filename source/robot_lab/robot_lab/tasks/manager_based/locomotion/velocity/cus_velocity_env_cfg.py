@@ -761,6 +761,8 @@ class RewardsCfg:
             "mani_regularization_support_left_right_x_symmetry_std": 0.05,
             "mani_regularization_support_left_right_y_symmetry_weight": 0.0,
             "mani_regularization_support_left_right_y_symmetry_std": 0.05,
+            "mani_regularization_support_symmetry_max_base_lin_speed": None,
+            "mani_regularization_support_symmetry_max_base_ang_speed": None,
             # manipulation 势奖励与累计误差。
             # 势奖励内部使用的命令名。
             "mani_potential_command_name": "ee_pose",
@@ -1011,10 +1013,10 @@ class TerminationsCfg:
         func=mdp.joint_torque_termination,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            # 先临时放宽力矩终止阈值，用于确认主问题是否就是“动作过猛导致开局打爆关节”。
-            "soft_max_violation": 3.0,
-            "hard_max_violation": 10.0,
-            "consecutive_steps": 8,
+            # Terminate only on sustained single-joint torque saturation.
+            "soft_max_ratio": 1.0,
+            "hard_max_ratio": 1.5,
+            "consecutive_steps": 12,
         },
     )
     # 成功终止：基座和机械臂速度都很小，且末端跟踪误差足够小。

@@ -73,7 +73,6 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import math
 import os
 import time
 
@@ -92,7 +91,6 @@ from isaaclab.envs import (
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.math import quat_apply_inverse
 
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
@@ -108,188 +106,17 @@ from rl_utils import camera_follow
 # PLACEHOLDER: Extension template (do not remove this comment)
 
 
-def _format_pitch_debug_line(env) -> str | None:
-    """Return a compact pitch debug line for env 0."""
-    try:
-        scene = env.unwrapped.scene
-        robot = scene["robot"]
-        quat_wxyz = robot.data.root_quat_w[0]
-        gravity_b = robot.data.projected_gravity_b[0]
+def _print_go2arm_termination_reasons(extras: dict) -> None:
+    """Print per-env Go2Arm termination causes when the env exposes them."""
+    termination_reasons = extras.get("go2arm_termination_reasons")
+    if not termination_reasons:
+        return
 
-        w, x, y, z = quat_wxyz.unbind(dim=-1)
-        reward_pitch = torch.asin(torch.clamp(2.0 * (w * y - z * x), -1.0, 1.0))
-        gravity_pitch = torch.atan2(
-            -gravity_b[0],
-            torch.sqrt(gravity_b[1] * gravity_b[1] + gravity_b[2] * gravity_b[2]),
-        )
-
-        front_rear_dz_text = "n/a"
-        body_names = getattr(robot, "body_names", [])
-        front_names = ("FL_hip", "FR_hip")
-        rear_names = ("RL_hip", "RR_hip")
-        if all(name in body_names for name in (*front_names, *rear_names)):
-            front_ids = [body_names.index(name) for name in front_names]
-            rear_ids = [body_names.index(name) for name in rear_names]
-            body_pos_w = robot.data.body_pos_w[0]
-            front_z = torch.mean(body_pos_w[front_ids, 2])
-            rear_z = torch.mean(body_pos_w[rear_ids, 2])
-            front_rear_dz = front_z - rear_z
-            front_rear_dz_text = f"{front_rear_dz.item():+.4f} m"
-
-        return (
-            "[PITCH env0] "
-            f"reward_pitch={reward_pitch.item():+.4f} rad/{math.degrees(reward_pitch.item()):+.1f} deg, "
-            f"gravity_pitch={gravity_pitch.item():+.4f} rad/{math.degrees(gravity_pitch.item()):+.1f} deg, "
-            f"front_rear_dz={front_rear_dz_text}"
-        )
-    except Exception as exc:
-        return f"[PITCH env0] unavailable: {exc}"
-
-
-def _format_go2arm_tracking_debug_lines(env) -> list[str]:
-    """Return Go2Arm play debug lines for env 0."""
-    lines: list[str] = []
-    try:
-        scene = env.unwrapped.scene
-        robot = scene["robot"]
-        quat_wxyz = robot.data.root_quat_w[0]
-        w, x, y, z = quat_wxyz.unbind(dim=-1)
-        pitch = torch.asin(torch.clamp(2.0 * (w * y - z * x), -1.0, 1.0))
-        lines.append(f"[PITCH env0] {pitch.item():+.4f} rad / {math.degrees(pitch.item()):+.2f} deg")
-    except Exception as exc:
-        lines.append(f"[PITCH env0] unavailable: {exc}")
-
-    try:
-        command_term = env.unwrapped.command_manager.get_term("ee_pose")
-        position_error = command_term.position_tracking_error[0]
-        orientation_error = command_term.orientation_tracking_error[0]
-        lines.append(f"[EE POSITION ERROR env0] {position_error.item():.6f}")
-        lines.append(f"[EE ORIENTATION ERROR env0] {orientation_error.item():.6f}")
-    except Exception as exc:
-        lines.append(f"[EE POSITION ERROR env0] unavailable: {exc}")
-        lines.append(f"[EE ORIENTATION ERROR env0] unavailable: {exc}")
-
-    try:
-        scene = env.unwrapped.scene
-        robot = scene["robot"]
-        leg_names = ("FL", "FR", "RL", "RR")
-        joint_names = [f"{leg}_{joint}_joint" for leg in leg_names for joint in ("hip", "thigh", "calf")]
-        joint_ids, _ = robot.find_joints(joint_names, preserve_order=True)
-        joint_delta = robot.data.joint_pos[0, joint_ids] - robot.data.default_joint_pos[0, joint_ids]
-        grouped_delta = joint_delta.reshape(len(leg_names), 3)
-        delta_text = " ".join(
-            f"{leg}=({values[0].item():+.2f},{values[1].item():+.2f},{values[2].item():+.2f})"
-            for leg, values in zip(leg_names, grouped_delta)
-        )
-        lines.append(f"[LEG JOINT DELTA env0] {delta_text}")
-
-        foot_names = tuple(f"{leg}_foot" for leg in leg_names)
-        foot_ids, _ = robot.find_bodies(foot_names, preserve_order=True)
-        foot_z = robot.data.body_pos_w[0, foot_ids, 2]
-        foot_z_text = " ".join(f"{leg}={value.item():+.3f}" for leg, value in zip(leg_names, foot_z))
-        lines.append(f"[FOOT Z env0] {foot_z_text}")
-        foot_pos_rel_w = robot.data.body_pos_w[0, foot_ids] - robot.data.root_pos_w[0].unsqueeze(0)
-        foot_pos_b = quat_apply_inverse(robot.data.root_quat_w[0].unsqueeze(0), foot_pos_rel_w)
-        foot_pos_b_text = " ".join(
-            f"{leg}=({pos[0].item():+.3f},{pos[1].item():+.3f},{pos[2].item():+.3f})"
-            for leg, pos in zip(leg_names, foot_pos_b)
-        )
-        lines.append(f"[FOOT POS B env0 xyz] {foot_pos_b_text}")
-
-        force_values = []
-        force_z_values = []
-        matrix_values = []
-        matrix_z_values = []
-        for leg in leg_names:
-            sensor = scene.sensors.get(f"{leg}_foot_contact")
-            if sensor is None:
-                force_values.append(float("nan"))
-                force_z_values.append(float("nan"))
-                matrix_values.append(float("nan"))
-                matrix_z_values.append(float("nan"))
-                continue
-            net_force = sensor.data.net_forces_w[0, 0]
-            force_values.append(torch.linalg.norm(net_force).item())
-            force_z_values.append(net_force[2].item())
-            if sensor.data.force_matrix_w is not None:
-                matrix_force = torch.sum(sensor.data.force_matrix_w[0, 0], dim=0)
-                matrix_values.append(torch.linalg.norm(matrix_force).item())
-                matrix_z_values.append(matrix_force[2].item())
-            else:
-                matrix_values.append(float("nan"))
-                matrix_z_values.append(float("nan"))
-        force_text = " ".join(f"{leg}={value:.2f}" for leg, value in zip(leg_names, force_values))
-        lines.append(f"[FOOT CONTACT FORCE env0] {force_text}")
-        force_z_text = " ".join(f"{leg}={value:+.2f}" for leg, value in zip(leg_names, force_z_values))
-        lines.append(f"[FOOT CONTACT FORCE Z env0] {force_z_text} sum={sum(force_z_values):+.2f}")
-        matrix_text = " ".join(f"{leg}={value:.2f}" for leg, value in zip(leg_names, matrix_values))
-        lines.append(f"[FOOT MATRIX FORCE env0] {matrix_text}")
-        matrix_z_text = " ".join(f"{leg}={value:+.2f}" for leg, value in zip(leg_names, matrix_z_values))
-        lines.append(f"[FOOT MATRIX FORCE Z env0] {matrix_z_text} sum={sum(matrix_z_values):+.2f}")
-
-        global_sensor = scene.sensors.get("contact_forces")
-        if global_sensor is not None:
-            global_foot_ids, _ = global_sensor.find_bodies(foot_names, preserve_order=True)
-            global_foot_forces = global_sensor.data.net_forces_w[0, global_foot_ids]
-            global_force_norm = torch.linalg.norm(global_foot_forces, dim=-1)
-            global_force_text = " ".join(
-                f"{leg}={value.item():.2f}" for leg, value in zip(leg_names, global_force_norm)
-            )
-            lines.append(f"[GLOBAL FOOT FORCE env0] {global_force_text}")
-            global_force_z = global_foot_forces[:, 2]
-            global_force_z_text = " ".join(
-                f"{leg}={value.item():+.2f}" for leg, value in zip(leg_names, global_force_z)
-            )
-            lines.append(
-                f"[GLOBAL FOOT FORCE Z env0] {global_force_z_text} sum={torch.sum(global_force_z).item():+.2f}"
-            )
-            all_body_force_norm = torch.linalg.norm(global_sensor.data.net_forces_w[0], dim=-1)
-            top_count = min(8, all_body_force_norm.numel())
-            top_values, top_ids = torch.topk(all_body_force_norm, k=top_count)
-            top_body_text = " ".join(
-                f"{global_sensor.body_names[int(body_id)]}={value.item():.2f}"
-                for body_id, value in zip(top_ids, top_values)
-            )
-            non_foot_ids = [
-                body_id for body_id, body_name in enumerate(global_sensor.body_names) if body_name not in foot_names
-            ]
-            if non_foot_ids:
-                non_foot_forces = all_body_force_norm[torch.as_tensor(non_foot_ids, device=all_body_force_norm.device)]
-                non_foot_top_value, non_foot_top_pos = torch.max(non_foot_forces, dim=0)
-                non_foot_top_id = non_foot_ids[int(non_foot_top_pos.item())]
-                non_foot_top_name = global_sensor.body_names[non_foot_top_id]
-                lines.append(
-                    "[GLOBAL TOP BODY FORCE env0] "
-                    f"{top_body_text}; max_non_foot={non_foot_top_name}:{non_foot_top_value.item():.2f}"
-                )
-
-        joint_vel = robot.data.joint_vel[0, joint_ids].reshape(len(leg_names), 3)
-        vel_text = " ".join(
-            f"{leg}=({values[0].item():+.2f},{values[1].item():+.2f},{values[2].item():+.2f})"
-            for leg, values in zip(leg_names, joint_vel)
-        )
-        lines.append(f"[LEG JOINT VEL env0] {vel_text}")
-
-        action_term = env.unwrapped.action_manager.get_term("joint_pos")
-        leg_action_ids = [action_term._joint_names.index(name) for name in joint_names]
-        leg_raw_action = action_term.raw_actions[0, leg_action_ids].reshape(len(leg_names), 3)
-        raw_action_text = " ".join(
-            f"{leg}=({values[0].item():+.2f},{values[1].item():+.2f},{values[2].item():+.2f})"
-            for leg, values in zip(leg_names, leg_raw_action)
-        )
-        lines.append(f"[LEG RAW ACTION env0] {raw_action_text}")
-        leg_target_delta = (
-            action_term.processed_actions[0, leg_action_ids] - robot.data.default_joint_pos[0, joint_ids]
-        ).reshape(len(leg_names), 3)
-        target_delta_text = " ".join(
-            f"{leg}=({values[0].item():+.2f},{values[1].item():+.2f},{values[2].item():+.2f})"
-            for leg, values in zip(leg_names, leg_target_delta)
-        )
-        lines.append(f"[LEG TARGET DELTA env0] {target_delta_text}")
-    except Exception as exc:
-        lines.append(f"[LEG/FOOT DEBUG env0] unavailable: {exc}")
-
-    return lines
+    for item in termination_reasons:
+        env_id = item.get("env_id", "?")
+        state = "truncated" if item.get("truncated") else "terminated"
+        reasons = ", ".join(item.get("reasons", ())) or "unknown"
+        print(f"[TERMINATION env{env_id}] {state}: {reasons}")
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -322,6 +149,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.events.push_robot = None
     env_cfg.curriculum.command_levels_lin_vel = None
     env_cfg.curriculum.command_levels_ang_vel = None
+    if "go2arm" in task_name.lower():
+        env_cfg.enable_play_termination_reason_logging = True
     go2arm_fixed_target = args_cli.go2arm_ee_pos is not None or args_cli.go2arm_ee_rpy is not None
     if go2arm_fixed_target and hasattr(env_cfg.curriculum, "go2arm_reaching_stages"):
         env_cfg.curriculum.go2arm_reaching_stages = None
@@ -485,7 +314,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # reset environment
     obs = env.get_observations()
     timestep = 0
-    last_time_print = time.time()
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -494,7 +322,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # agent stepping
             actions = policy(obs)
             # env stepping
-            obs, _, dones, _ = env.step(actions)
+            obs, _, dones, extras = env.step(actions)
+            _print_go2arm_termination_reasons(extras)
             # reset recurrent states for episodes that have terminated
             policy_nn.reset(dones)
         if args_cli.video:
@@ -510,14 +339,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
-
-        # print current time every 1 second
-        now = time.time()
-        if now - last_time_print >= 1.0:
-            print(f"[TIME] {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")
-            for debug_line in _format_go2arm_tracking_debug_lines(env):
-                print(debug_line)
-            last_time_print = now
 
     # close the simulator
     env.close()

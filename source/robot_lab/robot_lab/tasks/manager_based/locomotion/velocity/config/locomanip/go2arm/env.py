@@ -127,6 +127,9 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         self._enable_collision_group_logging = bool(getattr(cfg, "enable_collision_group_logging", False))
         self._enable_contact_verification_logging = bool(getattr(cfg, "enable_contact_verification_logging", False))
         self._enable_termination_debug_logging = bool(getattr(cfg, "enable_termination_debug_logging", False))
+        self._enable_play_termination_reason_logging = bool(
+            getattr(cfg, "enable_play_termination_reason_logging", False)
+        )
         self._episode_log_key_prefixes = tuple(getattr(cfg, "episode_log_key_prefixes", ()) or ())
         reward_log_interval_iterations = getattr(cfg, "reward_log_interval_iterations", None)
         reward_log_steps_per_iteration = int(getattr(cfg, "reward_log_steps_per_iteration", 24))
@@ -497,6 +500,37 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
             )
             episode_dict[f"Term/{term_name}"] = term_value[done_mask].mean()
 
+    def _collect_termination_reasons(self, terminated: torch.Tensor, truncated: torch.Tensor) -> list[dict]:
+        """Collect per-env terminal causes for play-time diagnostics."""
+        done_mask = terminated | truncated
+        if not torch.any(done_mask):
+            return []
+
+        term_values = {
+            term_name: self.termination_manager.get_term(term_name).detach().to(device="cpu", dtype=torch.bool)
+            for term_name in self.termination_manager.active_terms
+        }
+        terminated_cpu = terminated.detach().to(device="cpu", dtype=torch.bool)
+        truncated_cpu = truncated.detach().to(device="cpu", dtype=torch.bool)
+
+        reasons = []
+        for env_id in torch.where(done_mask.detach().to(device="cpu"))[0].tolist():
+            active_reasons = [term_name for term_name, term_value in term_values.items() if bool(term_value[env_id])]
+            if not active_reasons:
+                if bool(truncated_cpu[env_id]):
+                    active_reasons.append("truncated")
+                elif bool(terminated_cpu[env_id]):
+                    active_reasons.append("terminated")
+            reasons.append(
+                {
+                    "env_id": int(env_id),
+                    "terminated": bool(terminated_cpu[env_id]),
+                    "truncated": bool(truncated_cpu[env_id]),
+                    "reasons": active_reasons,
+                }
+            )
+        return reasons
+
     def step(self, action: torch.Tensor):
         self._go2arm_reward_cache = None
         self._go2arm_reward_cache_term_name = None
@@ -513,6 +547,10 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         done_mask = terminated | truncated
         if torch.any(done_mask):
             self.action_manager.prev_prev_action[done_mask] = 0.0
+        if self._enable_play_termination_reason_logging and torch.any(done_mask):
+            extras["go2arm_termination_reasons"] = self._collect_termination_reasons(
+                terminated=terminated, truncated=truncated
+            )
 
         episode_dict: dict[str, float | torch.Tensor] = extras.setdefault("episode", {})
         self._merge_reset_logs_into_episode(extras, episode_dict)

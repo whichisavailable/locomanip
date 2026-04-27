@@ -163,16 +163,43 @@ def joint_velocity_termination(
 
 def joint_torque_termination(
     env,
-    soft_max_violation: float,
-    hard_max_violation: float,
+    soft_max_ratio: float,
+    hard_max_ratio: float,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     consecutive_steps: int = 3,
 ) -> torch.Tensor:
-    """关节力矩越界终止。"""
+    """Terminate on sustained single-joint torque saturation."""
 
-    violation = mdp.applied_torque_limits(env, asset_cfg=asset_cfg)
-    hard_violation = violation > hard_max_violation
-    soft_violation = violation > soft_max_violation
+    asset = env.scene[asset_cfg.name]
+    joint_ids = asset_cfg.joint_ids
+    computed_torque = torch.abs(asset.data.computed_torque[:, joint_ids])
+
+    effort_limits = torch.full_like(asset.data.computed_torque, torch.inf)
+    for actuator in asset.actuators.values():
+        actuator_joint_ids = torch.as_tensor(actuator.joint_indices, device=env.device, dtype=torch.long)
+        actuator_effort_limit = actuator.effort_limit
+        if not isinstance(actuator_effort_limit, torch.Tensor):
+            actuator_effort_limit = torch.full(
+                (env.num_envs, actuator_joint_ids.numel()),
+                float(actuator_effort_limit),
+                device=env.device,
+                dtype=computed_torque.dtype,
+            )
+        else:
+            actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=computed_torque.dtype)
+            if actuator_effort_limit.dim() == 0:
+                actuator_effort_limit = actuator_effort_limit.reshape(1, 1).expand(
+                    env.num_envs, actuator_joint_ids.numel()
+                )
+            elif actuator_effort_limit.dim() == 1:
+                actuator_effort_limit = actuator_effort_limit.unsqueeze(0).expand(env.num_envs, -1)
+        effort_limits[:, actuator_joint_ids] = actuator_effort_limit
+
+    selected_effort_limits = torch.clamp(effort_limits[:, joint_ids], min=1.0e-6)
+    max_torque_ratio = torch.max(computed_torque / selected_effort_limits, dim=1)[0]
+
+    hard_violation = max_torque_ratio > hard_max_ratio
+    soft_violation = max_torque_ratio > soft_max_ratio
     return hard_violation | _persistent_violation(
         env=env,
         violation_mask=soft_violation,
