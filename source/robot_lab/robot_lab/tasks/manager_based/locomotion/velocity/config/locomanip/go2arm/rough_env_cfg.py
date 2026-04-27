@@ -78,7 +78,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        self.scene.num_envs = 16384
+        self.scene.num_envs = 4096
 
         # Teacher observation layout.
         self.observations.policy = Go2ArmTeacherCoreObsCfg()
@@ -213,12 +213,12 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             func=mdp.go2arm_reaching_stages,
             params={
                 "command_name": "ee_pose",
-                "steps_per_iteration": 24,
-                "stage1_end_iteration": 100,
-                "stage2_hold_end_iteration": 200,
-                "stage2_expand_end_iteration": 300,
-                "stage2_ratio_end_iteration": 425,
-                "stage3_xy_end_iteration": 625,
+                "steps_per_iteration": 32,
+                "stage1_end_iteration": 1000,
+                "stage2_hold_end_iteration": 1500,
+                "stage2_expand_end_iteration": 2000,
+                "stage2_ratio_end_iteration": 2500,
+                "stage3_xy_end_iteration": 3000,
                 "stage2_expand_reach_fraction": 0.5,
                 "stage2_ratio_reach_fraction": 0.5,
                 "position_range_b_stage1_start": (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),

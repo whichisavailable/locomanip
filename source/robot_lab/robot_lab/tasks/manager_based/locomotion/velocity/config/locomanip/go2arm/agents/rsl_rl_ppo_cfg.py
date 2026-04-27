@@ -24,11 +24,11 @@ def _resolve_init_noise_std(*, allow_vector: bool) -> float | tuple[float, ...]:
 
 @configclass
 class UnitreeGo2ArmRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
-    max_iterations = 5000
-    save_interval = 25
+    num_steps_per_env = 32
+    max_iterations = 20000
+    save_interval = 50
     experiment_name = "unitree_go2arm_rough"
-    go2arm_mani_phase_reset_iteration = 100
+    go2arm_mani_phase_reset_iteration = 1000
     go2arm_mani_phase_reset_arm_action_indices = tuple(range(12, 18))
     go2arm_mani_phase_reset_arm_std = 0.4
     go2arm_mani_phase_reset_learning_rate = 3.0e-4
@@ -49,7 +49,7 @@ class UnitreeGo2ArmRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.002,
         num_learning_epochs=8,
-        num_mini_batches=16,
+        num_mini_batches=4,
         learning_rate=3.0e-4,
         schedule="adaptive",
         gamma=0.99,
@@ -61,11 +61,11 @@ class UnitreeGo2ArmRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24
-    max_iterations = 5000
-    save_interval = 25
+    num_steps_per_env = 32
+    max_iterations = 20000
+    save_interval = 50
     experiment_name = "unitree_go2arm_teacher_rough"
-    go2arm_mani_phase_reset_iteration = 100
+    go2arm_mani_phase_reset_iteration = 1000
     go2arm_mani_phase_reset_arm_action_indices = tuple(range(12, 18))
     go2arm_mani_phase_reset_arm_std = 0.4
     go2arm_mani_phase_reset_learning_rate = 3.0e-4
@@ -97,7 +97,7 @@ class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         clip_param=0.2,
         entropy_coef=0.002,
         num_learning_epochs=8,
-        num_mini_batches=16,
+        num_mini_batches=4,
         learning_rate=3.0e-4,
         schedule="adaptive",
         gamma=0.99,
