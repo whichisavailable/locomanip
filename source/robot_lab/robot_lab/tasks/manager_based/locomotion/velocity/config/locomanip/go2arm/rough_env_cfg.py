@@ -129,9 +129,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #   在 x∈[0.12, 0.30], |y|<=0.12 的前向窗口内，局部 z 的 99.5% 分位约为 0.8076，
         #   再加 nominal base height≈0.4m，取 world z 上界 1.20。
         # Start from forward targets so the error-gated reward naturally emphasizes locomotion first.
-        stage1_position_range_b = (0.70, 1.60, -0.08, 0.08, 0.0, 0.0)
-        stage2_position_range_b = (0.45, 2.20, -0.15, 0.15, 0.0, 0.0)
-        stage3_position_range_b = (0.25, 2.50, -0.30, 0.30, 0.0, 0.0)
+        stage1_position_range_b = (0.70, 1.60, 0.0, 0.0, 0.0, 0.0)
+        stage2_position_range_b = (0.45, 2.20, 0.0, 0.0, 0.0, 0.0)
+        stage3_position_range_b = (0.25, 2.50, 0.0, 0.0, 0.0, 0.0)
         # Fixed orientation range: keep targets inside the wrist workspace that remains practical with
         # the arm action range clipped to about 80% of the joint limits.
         stage3_euler_xyz_range_b = (-0.35, 0.35, -0.35, 0.35, -1.20, 1.20)
@@ -221,24 +221,24 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "stage3_xy_end_iteration": 625,
                 "stage2_expand_reach_fraction": 0.5,
                 "stage2_ratio_reach_fraction": 0.5,
-                "position_range_b_stage1_start": (0.70, 1.20, -0.06, 0.06, 0.0, 0.0),
+                "position_range_b_stage1_start": (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),
                 "position_range_b_stage1": stage1_position_range_b,
                 "position_range_b_stage2_allowed_start": stage2_position_range_b,
                 "position_range_b_stage3": stage3_position_range_b,
-                "world_z_range_stage1": (0.45, 0.85),
-                "world_z_range_stage2_allowed_start": (0.30, 1.00),
-                "world_z_range_stage3": (0.05, 1.20),
+                "world_z_range_stage1": (0.45, 0.6),
+                "world_z_range_stage2_allowed_start": (0.30, 0.7),
+                "world_z_range_stage3": (0.1, 1.0),
                 "euler_xyz_range_b_stage1": stage1_euler_xyz_range_b,
                 "euler_xyz_range_b_stage2_allowed": stage2_euler_xyz_range_b,
                 "euler_xyz_range_b_stage3": stage3_euler_xyz_range_b,
-                "position_range_b_hard_low_start": (0.45, 2.20, -0.15, 0.15, 0.0, 0.0),
-                "position_range_b_hard_low_final": (0.35, 2.50, -0.22, 0.22, 0.0, 0.0),
+                "position_range_b_hard_low_start": (0.45, 2.20, 0.0, 0.0, 0.0, 0.0),
+                "position_range_b_hard_low_final": (0.35, 2.50, 0.0, 0.0, 0.0, 0.0),
                 "world_z_range_hard_low_start": (0.20, 0.35),
-                "world_z_range_hard_low_final": (0.05, 0.35),
-                "position_range_b_hard_high_start": (0.45, 2.20, -0.15, 0.15, 0.0, 0.0),
-                "position_range_b_hard_high_final": (0.35, 2.50, -0.22, 0.22, 0.0, 0.0),
-                "world_z_range_hard_high_start": (1.00, 1.12),
-                "world_z_range_hard_high_final": (1.02, 1.20),
+                "world_z_range_hard_low_final": (0.1, 0.35),
+                "position_range_b_hard_high_start": (0.45, 2.20, 0.0, 0.0, 0.0, 0.0),
+                "position_range_b_hard_high_final": (0.35, 2.50, 0.0, 0.0, 0.0, 0.0),
+                "world_z_range_hard_high_start": (0.8, 0.9),
+                "world_z_range_hard_high_final": (0.8, 1),
                 "euler_xyz_range_b_hard_low": stage3_euler_xyz_range_b,
                 "euler_xyz_range_b_hard_high": stage3_euler_xyz_range_b,
                 "hard_low_sample_prob_stage2_base": 0.08,
