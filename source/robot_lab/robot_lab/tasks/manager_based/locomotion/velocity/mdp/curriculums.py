@@ -103,6 +103,8 @@ def go2arm_reaching_stages(
     env_ids: Sequence[int],
     command_name: str = "ee_pose",
     steps_per_iteration: int = 24,
+    total_reward_term_name: str = "total_reward",
+    loco_stage_end_iteration: int = 0,
     stage1_end_iteration: int = 200,
     stage2_hold_end_iteration: int = 700,
     stage2_expand_end_iteration: int = 1500,
@@ -110,6 +112,9 @@ def go2arm_reaching_stages(
     stage3_xy_end_iteration: int = 3000,
     stage2_expand_reach_fraction: float = 0.5,
     stage2_ratio_reach_fraction: float = 0.5,
+    position_range_b_loco_stage: Sequence[float] = (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),
+    world_z_range_loco_stage: Sequence[float] = (0.6926649548, 0.6926649548),
+    euler_xyz_range_b_loco_stage: Sequence[float] = (0.0, 0.0, 1.5008926535, 1.5008926535, 0.0, 0.0),
     position_range_b_stage1_start: Sequence[float] | None = None,
     position_range_b_stage1: Sequence[float] = (0.10, 0.24, -0.12, 0.12, 0.0, 0.0),
     position_range_b_stage2_allowed_start: Sequence[float] = (0.08, 0.30, -0.14, 0.14, 0.0, 0.0),
@@ -150,7 +155,7 @@ def go2arm_reaching_stages(
     reset_root_yaw_range_stage2: Sequence[float] = (-0.10, 0.10),
     reset_root_yaw_range_stage3: Sequence[float] = (-0.18, 0.18),
 ) -> torch.Tensor:
-    """go2arm 三阶段课程：先学近端安全操纵，再学 z 轴极值任务，最后扩大全局 xy 覆盖。"""
+    """go2arm staged curriculum: optional loco-only warmup, then manipulation range expansion."""
     del env_ids
 
     command_term = env.command_manager.get_term(command_name)
@@ -158,8 +163,28 @@ def go2arm_reaching_stages(
     step = int(getattr(env, "common_step_counter", 0))
     current_iteration = float(step) / float(max(steps_per_iteration, 1))
 
-    if current_iteration < stage1_end_iteration:
-        stage_progress = _clamp_progress(current_iteration, 0, stage1_end_iteration)
+    if current_iteration < loco_stage_end_iteration:
+        stage_progress = _clamp_progress(current_iteration, 0, loco_stage_end_iteration)
+        current_position_range_b = tuple(float(v) for v in position_range_b_loco_stage)
+        current_euler_xyz_range_b = tuple(float(v) for v in euler_xyz_range_b_loco_stage)
+        current_world_z_range = tuple(float(v) for v in world_z_range_loco_stage)
+        current_secondary_position_range_b = None
+        current_secondary_euler_xyz_range_b = None
+        current_secondary_world_z_range = None
+        current_secondary_sample_prob = 0.0
+        current_tertiary_position_range_b = None
+        current_tertiary_euler_xyz_range_b = None
+        current_tertiary_world_z_range = None
+        current_tertiary_sample_prob = 0.0
+        current_reset_joint_position_range = tuple(float(v) for v in reset_joint_position_range_stage1)
+        current_reset_joint_velocity_range = tuple(float(v) for v in reset_joint_velocity_range_stage1)
+        current_reset_root_x_range = tuple(float(v) for v in reset_root_x_range_stage1)
+        current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage1)
+        current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage1)
+        current_gating_fixed_d = 1.0
+        stage_value = stage_progress
+    elif current_iteration < stage1_end_iteration:
+        stage_progress = _clamp_progress(current_iteration, loco_stage_end_iteration, stage1_end_iteration)
         if position_range_b_stage1_start is not None:
             current_position_range_b = _lerp_tuple(
                 position_range_b_stage1_start, position_range_b_stage1, stage_progress
@@ -181,6 +206,7 @@ def go2arm_reaching_stages(
         current_reset_root_x_range = tuple(float(v) for v in reset_root_x_range_stage1)
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage1)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage1)
+        current_gating_fixed_d = None
         stage_value = 1.0 + stage_progress
     elif current_iteration < stage2_hold_end_iteration:
         stage_progress = _clamp_progress(current_iteration, stage1_end_iteration, stage2_hold_end_iteration)
@@ -206,6 +232,7 @@ def go2arm_reaching_stages(
         current_reset_root_yaw_range = _lerp_tuple(
             reset_root_yaw_range_stage1, reset_root_yaw_range_stage2, stage_progress
         )
+        current_gating_fixed_d = None
         stage_value = 2.0 + stage_progress
     elif current_iteration < stage2_expand_end_iteration:
         stage_progress = _frontloaded_progress(
@@ -241,6 +268,7 @@ def go2arm_reaching_stages(
         current_reset_root_yaw_range = _lerp_tuple(
             reset_root_yaw_range_stage1, reset_root_yaw_range_stage2, stage_progress
         )
+        current_gating_fixed_d = None
         stage_value = 3.0 + stage_progress
     elif current_iteration < stage2_ratio_end_iteration:
         stage_progress = _frontloaded_progress(
@@ -266,6 +294,7 @@ def go2arm_reaching_stages(
         current_reset_root_x_range = tuple(float(v) for v in reset_root_x_range_stage2)
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage2)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage2)
+        current_gating_fixed_d = None
         stage_value = 4.0 + stage_progress
     else:
         stage_progress = _clamp_progress(current_iteration, stage2_ratio_end_iteration, stage3_xy_end_iteration)
@@ -300,6 +329,7 @@ def go2arm_reaching_stages(
         current_reset_root_yaw_range = _lerp_tuple(
             reset_root_yaw_range_stage2, reset_root_yaw_range_stage3, stage_progress
         )
+        current_gating_fixed_d = None
         stage_value = 5.0 + stage_progress
 
     command_cfg.position_range_b = current_position_range_b
@@ -327,6 +357,9 @@ def go2arm_reaching_stages(
     env.cfg.commands.ee_pose.tertiary_euler_xyz_range_b = current_tertiary_euler_xyz_range_b
     env.cfg.commands.ee_pose.tertiary_world_z_range = current_tertiary_world_z_range
     env.cfg.commands.ee_pose.tertiary_sample_prob = current_tertiary_sample_prob
+    if hasattr(env.cfg.rewards, total_reward_term_name):
+        getattr(env.cfg.rewards, total_reward_term_name).params["gating_fixed_d"] = current_gating_fixed_d
+    env.reward_manager.get_term_cfg(total_reward_term_name).params["gating_fixed_d"] = current_gating_fixed_d
 
     env.cfg.events.randomize_reset_joints.params["position_range"] = current_reset_joint_position_range
     env.cfg.events.randomize_reset_joints.params["velocity_range"] = current_reset_joint_velocity_range

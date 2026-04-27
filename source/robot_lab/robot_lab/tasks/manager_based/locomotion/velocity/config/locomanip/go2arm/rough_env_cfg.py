@@ -23,6 +23,9 @@ from robot_lab.tasks.manager_based.locomotion.velocity.cus_velocity_env_cfg impo
 )
 
 
+GO2ARM_LOCO_STAGE_END_ITERATION = 1000
+
+
 @configclass
 class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     base_link_name = GO2ARM_BASE_BODY_NAME
@@ -55,6 +58,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     ]
     reward_log_interval_iterations: int = 1
     reward_log_steps_per_iteration: int = 24
+    go2arm_loco_stage_end_iteration: int = GO2ARM_LOCO_STAGE_END_ITERATION
+    go2arm_default_link6_world_z: float = 0.6926649548
+    go2arm_default_link6_pitch_b: float = 1.5008926535
     enable_debug_reward_logging: bool = True
     enable_collision_group_logging: bool = False
     enable_contact_verification_logging: bool = False
@@ -104,6 +110,10 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             "^joint5$": (-0.976, 0.976),
             "^joint6$": (-1.67552, 1.67552),
         }
+        self.actions.joint_pos.fixed_delta_action_joint_names = ["^joint[1-6]$"]
+        self.actions.joint_pos.fixed_delta_action_until_iteration = self.go2arm_loco_stage_end_iteration
+        self.actions.joint_pos.fixed_delta_action_steps_per_iteration = 24
+        self.actions.joint_pos.fixed_delta_action_value = 0.0
 
         # Only keep the ee_pose command.
         self.commands = Go2ArmTeacherCommandsCfg()
@@ -112,15 +122,14 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.ee_pose.reference_error_velocity = 0.5
         self.commands.ee_pose.orientation_error_weight = 0.1
 
-        # go2arm 三阶段课程：
-        # 1) 近端安全操纵：围绕默认末端工作点学习站稳与摆臂；
-        # 2) z 轴高难命令：先用较低比例引入前下方 / 前上方极值任务，
-        #    再同步扩 z 上下极限，最后在极限固定后继续增大高难样本比例；
-        # 3) 全局扩展：xy 范围逐步放大，同时 z 在最大范围内均匀采样。
+        # go2arm staged curriculum:
+        # 0) loco-only warmup: fixed arm delta action, fixed default world z, gate_d=1;
+        # 1) near safe manipulation: learn stable reaching around the initial forward box;
+        # 2) hard z commands: introduce low/high z extreme samples and expand their ranges;
+        # 3) global expansion: gradually enlarge xy while sampling z over the full range.
         #
-        # 默认 ee pose 由 go2arm URDF + 默认 joint_pos 推得：
-        #   ee_pos_b ≈ (0.1695, 0.0, 0.4911)
-        #   ee_euler_b ≈ (0.0, 1.4836, 0.0)
+        # Loco-only stage keeps link6 near its default world z:
+        # root/base height 0.4 + URDF FK base_link->link6 z 0.2926649548 = 0.6926649548.
         # stage1 围绕默认工作点给一个近端安全盒。
         # 这里改成混合采样：
         #   - xy 在 base frame 下采样，保证“前/后/左/右”的语义始终跟随机身；
@@ -129,6 +138,16 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         #   在 x∈[0.12, 0.30], |y|<=0.12 的前向窗口内，局部 z 的 99.5% 分位约为 0.8076，
         #   再加 nominal base height≈0.4m，取 world z 上界 1.20。
         # Start from forward targets so the error-gated reward naturally emphasizes locomotion first.
+        loco_stage_position_range_b = (0.70, 1.20, 0.0, 0.0, 0.0, 0.0)
+        loco_stage_world_z_range = (self.go2arm_default_link6_world_z, self.go2arm_default_link6_world_z)
+        loco_stage_euler_xyz_range_b = (
+            0.0,
+            0.0,
+            self.go2arm_default_link6_pitch_b,
+            self.go2arm_default_link6_pitch_b,
+            0.0,
+            0.0,
+        )
         stage1_position_range_b = (0.70, 1.60, 0.0, 0.0, 0.0, 0.0)
         stage2_position_range_b = (0.45, 2.20, 0.0, 0.0, 0.0, 0.0)
         stage3_position_range_b = (0.25, 2.50, 0.0, 0.0, 0.0, 0.0)
@@ -137,9 +156,10 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         stage3_euler_xyz_range_b = (-0.35, 0.35, -0.35, 0.35, -1.20, 1.20)
         stage1_euler_xyz_range_b = stage3_euler_xyz_range_b
         stage2_euler_xyz_range_b = stage3_euler_xyz_range_b
-        self.commands.ee_pose.position_range_b = stage1_position_range_b
+        self.commands.ee_pose.position_range_b = loco_stage_position_range_b
         self.commands.ee_pose.sample_z_in_world_frame = True
-        self.commands.ee_pose.euler_xyz_range_b = stage1_euler_xyz_range_b
+        self.commands.ee_pose.world_z_range = loco_stage_world_z_range
+        self.commands.ee_pose.euler_xyz_range_b = loco_stage_euler_xyz_range_b
 
         # Scene.
         self.scene.robot = UNITREE_Go2Arm_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -214,13 +234,17 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             params={
                 "command_name": "ee_pose",
                 "steps_per_iteration": 24,
-                "stage1_end_iteration": 1000,
-                "stage2_hold_end_iteration": 1500,
-                "stage2_expand_end_iteration": 2000,
-                "stage2_ratio_end_iteration": 2500,
-                "stage3_xy_end_iteration": 3000,
+                "loco_stage_end_iteration": self.go2arm_loco_stage_end_iteration,
+                "stage1_end_iteration": 2000,
+                "stage2_hold_end_iteration": 2500,
+                "stage2_expand_end_iteration": 3000,
+                "stage2_ratio_end_iteration": 3500,
+                "stage3_xy_end_iteration": 4000,
                 "stage2_expand_reach_fraction": 0.5,
                 "stage2_ratio_reach_fraction": 0.5,
+                "position_range_b_loco_stage": loco_stage_position_range_b,
+                "world_z_range_loco_stage": loco_stage_world_z_range,
+                "euler_xyz_range_b_loco_stage": loco_stage_euler_xyz_range_b,
                 "position_range_b_stage1_start": (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),
                 "position_range_b_stage1": stage1_position_range_b,
                 "position_range_b_stage2_allowed_start": stage2_position_range_b,
@@ -275,7 +299,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         self.rewards.total_reward.params["gating_mu"] = 0.65
         self.rewards.total_reward.params["gating_l"] = 0.9
-        self.rewards.total_reward.params["gating_fixed_d"] = None
+        self.rewards.total_reward.params["gating_fixed_d"] = 1.0
         # 放大势奖励，让“这一步比上一步更接近目标”在误差较大时成为主导正反馈。
         # 这次直接把该项改成 -tracking_error，因此外层直接给较大的固定权重来验证驱动效果。
         self.rewards.total_reward.params["mani_potential_weight"] = 50.0

@@ -7,6 +7,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 import math
+import re
 from collections.abc import Callable
 from dataclasses import MISSING
 from typing import cast
@@ -293,6 +294,7 @@ class Go2ArmDefaultDeltaJointPositionAction(joint_actions.JointPositionAction):
 
     def __init__(self, cfg: "Go2ArmDefaultDeltaJointPositionActionCfg", env):
         super().__init__(cfg, env)
+        self._env = env
         # 这里显式解析“偏移量 clip”，而不是沿用 JointAction 里对最终绝对目标的 clip。
         # 目标是让策略直接输出“弧度偏移”，再把偏移限制在一个合理小范围内。
         self._delta_clip = None
@@ -302,10 +304,26 @@ class Go2ArmDefaultDeltaJointPositionAction(joint_actions.JointPositionAction):
             )
             index_list, _, value_list = string_utils.resolve_matching_names_values(cfg.delta_clip, self._joint_names)
             self._delta_clip[:, index_list] = torch.tensor(value_list, device=self.device)
+        self._fixed_delta_action_joint_ids = None
+        if cfg.fixed_delta_action_joint_names is not None:
+            fixed_ids = [
+                joint_id
+                for joint_id, joint_name in enumerate(self._joint_names)
+                if any(re.fullmatch(pattern, joint_name) for pattern in cfg.fixed_delta_action_joint_names)
+            ]
+            if fixed_ids:
+                self._fixed_delta_action_joint_ids = torch.tensor(fixed_ids, dtype=torch.long, device=self.device)
 
     def process_actions(self, actions: torch.Tensor):
-        # 记录策略原始输出，便于外部继续读取 raw action。
-        self._raw_actions[:] = actions
+        # Store the effective action after any curriculum mask, so observations/rewards see executed deltas.
+        effective_actions = actions
+        if self._fixed_delta_action_joint_ids is not None and self.cfg.fixed_delta_action_until_iteration is not None:
+            step = int(getattr(self._env, "common_step_counter", 0))
+            current_iteration = float(step) / float(max(self.cfg.fixed_delta_action_steps_per_iteration, 1))
+            if current_iteration < float(self.cfg.fixed_delta_action_until_iteration):
+                effective_actions = actions.clone()
+                effective_actions[:, self._fixed_delta_action_joint_ids] = float(self.cfg.fixed_delta_action_value)
+        self._raw_actions[:] = effective_actions
         delta_actions = self._raw_actions
         if self._delta_clip is not None:
             # 这里 clip 的是“相对默认姿态的关节偏移量”，不是最终绝对关节目标。
@@ -321,6 +339,10 @@ class Go2ArmDefaultDeltaJointPositionActionCfg(mdp.JointPositionActionCfg):
     class_type: type[ActionTerm] = Go2ArmDefaultDeltaJointPositionAction
     # 对“关节偏移量”做 clip，而不是对最终绝对关节目标做 clip。
     delta_clip: dict[str, tuple[float, float]] | None = None
+    fixed_delta_action_joint_names: list[str] | None = None
+    fixed_delta_action_until_iteration: int | None = None
+    fixed_delta_action_steps_per_iteration: int = 24
+    fixed_delta_action_value: float = 0.0
 
 
 @configclass
