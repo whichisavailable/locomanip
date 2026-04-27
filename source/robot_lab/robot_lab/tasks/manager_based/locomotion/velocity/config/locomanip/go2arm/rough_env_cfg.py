@@ -213,7 +213,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             func=mdp.go2arm_reaching_stages,
             params={
                 "command_name": "ee_pose",
-                "steps_per_iteration": 32,
+                "steps_per_iteration": 24,
                 "stage1_end_iteration": 1000,
                 "stage2_hold_end_iteration": 1500,
                 "stage2_expand_end_iteration": 2000,
