@@ -530,16 +530,16 @@ def target_workspace_position_penalty(
     x_max: float,
     y_weight: float,
     std: float,
-    clip_max: float,
 ) -> torch.Tensor:
-    """Penalize target position outside the comfortable base-frame manipulation workspace."""
+    """Reward target placement inside the comfortable base-frame manipulation workspace."""
     command_term = _ee_pose_command_term(env, command_name)
     target_pos_b = command_term.target_pos_b
     x = target_pos_b[:, 0]
     y = target_pos_b[:, 1]
     x_violation = torch.relu(float(x_min) - x) + torch.relu(x - float(x_max))
     y_penalty = float(y_weight) * torch.abs(y)
-    return torch.clamp((x_violation + y_penalty) / std, max=float(clip_max))
+    distance = x_violation + y_penalty
+    return torch.exp(-distance / max(float(std), 1.0e-6))
 
 
 def base_roll_ang_vel_penalty(
@@ -753,27 +753,6 @@ def _get_go2arm_foot_contact_mask(env: ManagerBasedRLEnv, contact_force_threshol
     )
 
 
-def _get_go2arm_stable_support_mask(
-    env: ManagerBasedRLEnv,
-    in_contact: torch.Tensor,
-    max_base_lin_speed: float | None = None,
-    max_base_ang_speed: float | None = None,
-) -> torch.Tensor:
-    """Return environments where all feet are in contact and the base is nearly stationary."""
-    support_mask = torch.all(in_contact, dim=1)
-    if max_base_lin_speed is None and max_base_ang_speed is None:
-        return support_mask
-
-    asset: Articulation = env.scene["robot"]
-    if max_base_lin_speed is not None:
-        base_lin_speed_xy = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
-        support_mask = support_mask & (base_lin_speed_xy < float(max_base_lin_speed))
-    if max_base_ang_speed is not None:
-        base_yaw_speed = torch.abs(asset.data.root_ang_vel_b[:, 2])
-        support_mask = support_mask & (base_yaw_speed < float(max_base_ang_speed))
-    return support_mask
-
-
 def _compute_go2arm_left_right_symmetry_components(foot_positions_b: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute front/rear left-right symmetry penalties on x and y separately."""
     x_symmetry = 0.5 * (
@@ -866,41 +845,23 @@ def _get_go2arm_touchdown_symmetry_components(
     return cached_value
 
 
-def support_left_right_x_symmetry_penalty(
-    env: ManagerBasedRLEnv,
-    max_base_lin_speed: float | None = None,
-    max_base_ang_speed: float | None = None,
-) -> torch.Tensor:
-    """Penalty on left-right x symmetry while all four feet are stably supporting."""
+def support_left_right_x_symmetry_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalty on left-right x symmetry while all four feet are supporting."""
     asset_cfg = _get_go2arm_default_foot_asset_cfg(env)
     foot_positions_b = _get_go2arm_foot_centers_b(env, asset_cfg)
     x_symmetry, _ = _compute_go2arm_left_right_symmetry_components(foot_positions_b)
     in_contact = _get_go2arm_foot_contact_mask(env, contact_force_threshold=1.0)
-    support_mask = _get_go2arm_stable_support_mask(
-        env,
-        in_contact,
-        max_base_lin_speed=max_base_lin_speed,
-        max_base_ang_speed=max_base_ang_speed,
-    )
+    support_mask = torch.all(in_contact, dim=1)
     return x_symmetry * support_mask.float()
 
 
-def support_left_right_y_symmetry_penalty(
-    env: ManagerBasedRLEnv,
-    max_base_lin_speed: float | None = None,
-    max_base_ang_speed: float | None = None,
-) -> torch.Tensor:
-    """Penalty on left-right y mirror symmetry while all four feet are stably supporting."""
+def support_left_right_y_symmetry_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalty on left-right y mirror symmetry while all four feet are supporting."""
     asset_cfg = _get_go2arm_default_foot_asset_cfg(env)
     foot_positions_b = _get_go2arm_foot_centers_b(env, asset_cfg)
     _, y_symmetry = _compute_go2arm_left_right_symmetry_components(foot_positions_b)
     in_contact = _get_go2arm_foot_contact_mask(env, contact_force_threshold=1.0)
-    support_mask = _get_go2arm_stable_support_mask(
-        env,
-        in_contact,
-        max_base_lin_speed=max_base_lin_speed,
-        max_base_ang_speed=max_base_ang_speed,
-    )
+    support_mask = torch.all(in_contact, dim=1)
     return y_symmetry * support_mask.float()
 
 
@@ -1552,16 +1513,8 @@ def _compute_go2arm_reward_terms(
     joint_limit_safety = joint_limit_safety_penalty(
         env, asset_cfg=params["mani_regularization_joint_limit_safety_asset_cfg"]
     )
-    support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(
-        env,
-        max_base_lin_speed=params.get("mani_regularization_support_symmetry_max_base_lin_speed"),
-        max_base_ang_speed=params.get("mani_regularization_support_symmetry_max_base_ang_speed"),
-    )
-    support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(
-        env,
-        max_base_lin_speed=params.get("mani_regularization_support_symmetry_max_base_lin_speed"),
-        max_base_ang_speed=params.get("mani_regularization_support_symmetry_max_base_ang_speed"),
-    )
+    support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(env)
+    support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(env)
     mani_regularization_raw = (
         abs(params["mani_regularization_support_roll_weight"])
         * (support_roll / params["mani_regularization_support_roll_std"])
@@ -1652,16 +1605,15 @@ def _compute_go2arm_reward_terms(
     ee_tracking_potential_weighted = params["mani_potential_weight"] * ee_tracking_potential_value
     # 当前 cumulative 在 total_reward 里是直接减项，日志里改成“已乘系数后的实际贡献”口径。
     ee_cumulative_penalty_weighted = -ee_cumulative_penalty
-    workspace_position_penalty = target_workspace_position_penalty(
+    workspace_position_reward = target_workspace_position_penalty(
         env,
         command_name=params["workspace_position_command_name"],
         x_min=params["workspace_position_x_min"],
         x_max=params["workspace_position_x_max"],
         y_weight=params["workspace_position_y_weight"],
         std=params["workspace_position_std"],
-        clip_max=params["workspace_position_clip_max"],
     )
-    workspace_position_penalty_weighted = -abs(params["workspace_position_weight"]) * workspace_position_penalty
+    workspace_position_reward_weighted = abs(params["workspace_position_weight"]) * workspace_position_reward
 
     mani_total = (
         mani_regularization * (1.0 + ee_position_enhanced + ee_position_raw * ee_orientation_enhanced)
@@ -1856,7 +1808,7 @@ def _compute_go2arm_reward_terms(
     # -----------------------------
     # 10) 总奖励
     # -----------------------------
-    total = (1.0 - gate) * mani_total + gate * loco_total + basic_total + workspace_position_penalty_weighted
+    total = (1.0 - gate) * mani_total + gate * loco_total + basic_total + workspace_position_reward_weighted
 
     # -----------------------------
     # 11) 单次计算后统一缓存，供日志直接复用
@@ -1886,7 +1838,8 @@ def _compute_go2arm_reward_terms(
         "mani_regularization": mani_regularization,
         "ee_tracking_potential": ee_tracking_potential_weighted,
         "ee_cumulative_tracking_error_penalty": ee_cumulative_penalty_weighted,
-        "workspace_position_penalty": workspace_position_penalty_weighted,
+        "workspace_position_penalty": workspace_position_reward_weighted,
+        "workspace_position_reward": workspace_position_reward_weighted,
         "mani_reward": (1.0 - gate) * mani_total,
         "locomotion_tracking": locomotion_tracking,
         "moving_arm_default_deviation_penalty": moving_arm_deviation_weighted,
@@ -1975,8 +1928,6 @@ def total_reward(
     mani_regularization_support_left_right_x_symmetry_std: object = None,
     mani_regularization_support_left_right_y_symmetry_weight: object = None,
     mani_regularization_support_left_right_y_symmetry_std: object = None,
-    mani_regularization_support_symmetry_max_base_lin_speed: object = None,
-    mani_regularization_support_symmetry_max_base_ang_speed: object = None,
     mani_potential_command_name: object = None,
     mani_potential_std: object = None,
     mani_potential_weight: object = None,
@@ -2115,8 +2066,6 @@ def total_reward(
         mani_regularization_support_left_right_x_symmetry_std,
         mani_regularization_support_left_right_y_symmetry_weight,
         mani_regularization_support_left_right_y_symmetry_std,
-        mani_regularization_support_symmetry_max_base_lin_speed,
-        mani_regularization_support_symmetry_max_base_ang_speed,
         mani_potential_command_name,
         mani_potential_std,
         mani_potential_weight,

@@ -163,50 +163,59 @@ def joint_velocity_termination(
 
 def joint_torque_termination(
     env,
-    soft_max_ratio: float,
-    hard_max_ratio: float | None,
+    soft_max_ratio: float | None = None,
+    hard_max_ratio: float | None = None,
+    soft_max_violation: float | None = None,
+    hard_max_violation: float | None = None,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     consecutive_steps: int = 3,
 ) -> torch.Tensor:
-    """Terminate on sustained single-joint actuator torque clipping."""
+    """Terminate on sustained actuator torque clipping."""
 
     asset = env.scene[asset_cfg.name]
     joint_ids = asset_cfg.joint_ids
-    torque_dtype = asset.data.computed_torque.dtype
-
-    effort_limits = torch.full_like(asset.data.computed_torque, torch.inf)
-    for actuator in asset.actuators.values():
-        actuator_joint_ids = torch.as_tensor(actuator.joint_indices, device=env.device, dtype=torch.long)
-        actuator_effort_limit = actuator.effort_limit
-        if not isinstance(actuator_effort_limit, torch.Tensor):
-            actuator_effort_limit = torch.full(
-                (env.num_envs, actuator_joint_ids.numel()),
-                float(actuator_effort_limit),
-                device=env.device,
-                dtype=torque_dtype,
-            )
-        else:
-            actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=torque_dtype)
-            if actuator_effort_limit.dim() == 0:
-                actuator_effort_limit = actuator_effort_limit.reshape(1, 1).expand(
-                    env.num_envs, actuator_joint_ids.numel()
-                )
-            elif actuator_effort_limit.dim() == 1:
-                actuator_effort_limit = actuator_effort_limit.unsqueeze(0).expand(env.num_envs, -1)
-        effort_limits[:, actuator_joint_ids] = actuator_effort_limit
-
-    selected_effort_limits = torch.clamp(effort_limits[:, joint_ids], min=1.0e-6)
     torque_clipping = torch.abs(
         asset.data.computed_torque[:, joint_ids] - asset.data.applied_torque[:, joint_ids]
     )
-    max_torque_clipping_ratio = torch.max(torque_clipping / selected_effort_limits, dim=1)[0]
+
+    if soft_max_ratio is not None:
+        torque_dtype = asset.data.computed_torque.dtype
+        effort_limits = torch.full_like(asset.data.computed_torque, torch.inf)
+        for actuator in asset.actuators.values():
+            actuator_joint_ids = torch.as_tensor(actuator.joint_indices, device=env.device, dtype=torch.long)
+            actuator_effort_limit = actuator.effort_limit
+            if not isinstance(actuator_effort_limit, torch.Tensor):
+                actuator_effort_limit = torch.full(
+                    (env.num_envs, actuator_joint_ids.numel()),
+                    float(actuator_effort_limit),
+                    device=env.device,
+                    dtype=torque_dtype,
+                )
+            else:
+                actuator_effort_limit = actuator_effort_limit.to(device=env.device, dtype=torque_dtype)
+                if actuator_effort_limit.dim() == 0:
+                    actuator_effort_limit = actuator_effort_limit.reshape(1, 1).expand(
+                        env.num_envs, actuator_joint_ids.numel()
+                    )
+                elif actuator_effort_limit.dim() == 1:
+                    actuator_effort_limit = actuator_effort_limit.unsqueeze(0).expand(env.num_envs, -1)
+            effort_limits[:, actuator_joint_ids] = actuator_effort_limit
+
+        selected_effort_limits = torch.clamp(effort_limits[:, joint_ids], min=1.0e-6)
+        violation = torch.max(torque_clipping / selected_effort_limits, dim=1)[0]
+        soft_threshold = soft_max_ratio
+        hard_threshold = hard_max_ratio
+    else:
+        if soft_max_violation is None:
+            raise ValueError("joint_torque_termination requires either soft_max_ratio or soft_max_violation.")
+        violation = torch.sum(torque_clipping, dim=1)
+        soft_threshold = soft_max_violation
+        hard_threshold = hard_max_violation
 
     hard_violation = (
-        max_torque_clipping_ratio > hard_max_ratio
-        if hard_max_ratio is not None
-        else torch.zeros_like(max_torque_clipping_ratio, dtype=torch.bool)
+        violation > hard_threshold if hard_threshold is not None else torch.zeros_like(violation, dtype=torch.bool)
     )
-    soft_violation = max_torque_clipping_ratio > soft_max_ratio
+    soft_violation = violation > soft_threshold
     return hard_violation | _persistent_violation(
         env=env,
         violation_mask=soft_violation,

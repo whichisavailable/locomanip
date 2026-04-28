@@ -783,8 +783,6 @@ class RewardsCfg:
             "mani_regularization_support_left_right_x_symmetry_std": 0.05,
             "mani_regularization_support_left_right_y_symmetry_weight": 0.0,
             "mani_regularization_support_left_right_y_symmetry_std": 0.05,
-            "mani_regularization_support_symmetry_max_base_lin_speed": None,
-            "mani_regularization_support_symmetry_max_base_ang_speed": None,
             # manipulation 势奖励与累计误差。
             # 势奖励内部使用的命令名。
             "mani_potential_command_name": "ee_pose",
@@ -935,12 +933,12 @@ class RewardsCfg:
             "basic_joint_torque_sq_weight": 0.0,
             # 关节力矩平方和惩罚读取的关节集合。
             "basic_joint_torque_sq_asset_cfg": SceneEntityCfg("robot", joint_names=GO2ARM_ALL_JOINT_NAMES),
-            "basic_joint_torque_sq_normalize_by_effort_limit": True,
+            "basic_joint_torque_sq_normalize_by_effort_limit": False,
             # 关节功率惩罚权重。
             "basic_joint_power_weight": 0.0,
             # 关节功率惩罚读取的关节集合。
             "basic_joint_power_asset_cfg": SceneEntityCfg("robot", joint_names=GO2ARM_ALL_JOINT_NAMES),
-            "basic_joint_power_normalize_by_effort_limit": True,
+            "basic_joint_power_normalize_by_effort_limit": False,
         },
     )
     # 保留有状态势奖励项，供 total_reward 复用上一时刻缓存。
@@ -995,20 +993,20 @@ class TerminationsCfg:
         func=mdp.base_orientation_termination,
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names=[GO2ARM_BASE_BODY_NAME]),
-            "soft_roll_pitch_limit": 0.75,
-            "hard_roll_pitch_limit": 1.10,
-            "consecutive_steps": 3,
+            "soft_roll_pitch_limit": 0.4,
+            "hard_roll_pitch_limit": 0.5,
+            "consecutive_steps": 5,
         },
     )
     # 基座高度终止：过低则认为跌倒或趴地。
     base_height_termination = DoneTerm(
         func=mdp.base_height_termination,
         params={
-            "soft_minimum_height": 0.23,
-            "hard_minimum_height": 0.18,
+            "soft_minimum_height": 0.2,
+            "hard_minimum_height": 0.16,
             "asset_cfg": SceneEntityCfg("robot", body_names=[GO2ARM_BASE_BODY_NAME]),
             "sensor_cfg": SceneEntityCfg("height_scanner_base"),
-            "consecutive_steps": 3,
+            "consecutive_steps": 5,
         },
     )
     # 关节位置严重越界终止。
@@ -1037,11 +1035,10 @@ class TerminationsCfg:
         func=mdp.joint_torque_termination,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-            # Terminate only on sustained single-joint torque clipping:
-            # abs(computed_torque - applied_torque) / effort_limit.
-            "soft_max_ratio": 0.8,
-            "hard_max_ratio": None,
-            "consecutive_steps": 6,
+            # Legacy absolute clipping sum: sum(abs(computed_torque - applied_torque)).
+            "soft_max_violation": 3.0,
+            "hard_max_violation": 10.0,
+            "consecutive_steps": 8,
         },
     )
     # 成功终止：基座和机械臂速度都很小，且末端跟踪误差足够小。
@@ -1054,7 +1051,7 @@ class TerminationsCfg:
             "base_lin_vel_threshold": 0.05,
             "base_ang_vel_threshold": 0.10,
             "arm_joint_vel_threshold": 0.05,
-            "ee_tracking_error_threshold": 0.02,
+            "ee_tracking_error_threshold": 0.05,
             "consecutive_steps": 3,
         },
     )

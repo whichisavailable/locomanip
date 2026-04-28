@@ -242,6 +242,11 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "stage3_xy_end_iteration": 4000,
                 "stage2_expand_reach_fraction": 0.5,
                 "stage2_ratio_reach_fraction": 0.5,
+                "workspace_position_std_stage1_end_iteration": 300,
+                "workspace_position_std_stage2_end_iteration": 700,
+                "workspace_position_std_stage1": 0.5,
+                "workspace_position_std_stage2": 0.25,
+                "workspace_position_std_stage3": 0.1,
                 "position_range_b_loco_stage": loco_stage_position_range_b,
                 "world_z_range_loco_stage": loco_stage_world_z_range,
                 "euler_xyz_range_b_loco_stage": loco_stage_euler_xyz_range_b,
@@ -300,8 +305,6 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["gating_mu"] = 0.65
         self.rewards.total_reward.params["gating_l"] = 0.9
         self.rewards.total_reward.params["gating_fixed_d"] = 1.0
-        # 放大势奖励，让“这一步比上一步更接近目标”在误差较大时成为主导正反馈。
-        # 这次直接把该项改成 -tracking_error，因此外层直接给较大的固定权重来验证驱动效果。
         self.rewards.total_reward.params["mani_potential_weight"] = 50.0
         # 当前主要问题已经不是生存，而是 reaching 不够积极，因此把跟踪奖励做得更稠密一些。
         self.rewards.total_reward.params["mani_position_std"] = 0.35
@@ -349,15 +352,13 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["mani_regularization_support_left_right_x_symmetry_std"] = 0.04
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_weight"] = 0.08
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_std"] = 0.03
-        self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_lin_speed"] = 0.08
-        self.rewards.total_reward.params["mani_regularization_support_symmetry_max_base_ang_speed"] = 0.25
         self.rewards.total_reward.params["mani_cumulative_error_clip_max"] = 20.0
-        self.rewards.total_reward.params["workspace_position_weight"] = 2.9
-        self.rewards.total_reward.params["workspace_position_x_min"] = 0.25
-        self.rewards.total_reward.params["workspace_position_x_max"] = 0.35
-        self.rewards.total_reward.params["workspace_position_y_weight"] = 0.2
+        self.rewards.total_reward.params["workspace_position_weight"] = 0.5
+        self.rewards.total_reward.params["workspace_position_x_min"] = 0.30
+        self.rewards.total_reward.params["workspace_position_x_max"] = 0.50
+        self.rewards.total_reward.params["workspace_position_y_weight"] = 1.0
         self.rewards.total_reward.params["workspace_position_std"] = 0.5
-        self.rewards.total_reward.params["workspace_position_clip_max"] = 1.5
+        self.rewards.total_reward.params.pop("workspace_position_clip_max", None)
         # 继续保留轻度高度约束，但当前主要问题更偏向前倾和竖直速度，因此高度项不额外拉太高。
         self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.03
         self.rewards.total_reward.params["loco_regularization_base_height_std"] = 0.05
@@ -397,7 +398,6 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             0.7,
             0.4,
         )
-        # locomotion 阶段改为约束左右脚最近一次触地落脚点的对称性，分别约束 x/y 两个轴向。
         self.rewards.total_reward.params["loco_regularization_touchdown_left_right_x_symmetry_weight"] = 0.10
         self.rewards.total_reward.params["loco_regularization_touchdown_left_right_x_symmetry_std"] = 0.04
         self.rewards.total_reward.params["loco_regularization_touchdown_left_right_y_symmetry_weight"] = 0.12
@@ -438,7 +438,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["basic_action_smoothness_first_weight"] = -0.005
         self.rewards.total_reward.params["basic_action_smoothness_second_weight"] = -0.0015
         self.rewards.total_reward.params["basic_joint_torque_sq_weight"] = -1.6e-3
+        self.rewards.total_reward.params["basic_joint_torque_sq_normalize_by_effort_limit"] = True
         self.rewards.total_reward.params["basic_joint_power_weight"] = -1.32e-2
+        self.rewards.total_reward.params["basic_joint_power_normalize_by_effort_limit"] = True
 
         # Do not drop zero-weight rewards here.
         # total_reward still needs ee_tracking_potential as an internal stateful term.
@@ -449,12 +451,20 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.base_orientation_termination.params["asset_cfg"].body_names = [self.base_link_name]
         self.terminations.base_orientation_termination.params["soft_roll_pitch_limit"] = 0.20
         self.terminations.base_orientation_termination.params["hard_roll_pitch_limit"] = 0.35
-        self.terminations.base_orientation_termination.params["consecutive_steps"] = 5
+        self.terminations.base_orientation_termination.params["consecutive_steps"] = 3
         self.terminations.base_height_termination.params["asset_cfg"].body_names = [self.base_link_name]
         # 当前主要 termination 已经从力矩切换为 base_height，先略微放宽高度边界，避免过早截断稳定化学习。
         self.terminations.base_height_termination.params["soft_minimum_height"] = 0.20
         self.terminations.base_height_termination.params["hard_minimum_height"] = 0.16
-        self.terminations.base_height_termination.params["consecutive_steps"] = 5
+        self.terminations.base_height_termination.params["consecutive_steps"] = 3
+        self.terminations.joint_position_termination.params["soft_max_violation"] = 0.15
+        self.terminations.joint_position_termination.params["hard_max_violation"] = 0.30
+        self.terminations.joint_position_termination.params["consecutive_steps"] = 3
+        self.terminations.joint_torque_termination.params.pop("soft_max_violation", None)
+        self.terminations.joint_torque_termination.params.pop("hard_max_violation", None)
+        self.terminations.joint_torque_termination.params["soft_max_ratio"] = 0.5
+        self.terminations.joint_torque_termination.params["hard_max_ratio"] = None
+        self.terminations.joint_torque_termination.params["consecutive_steps"] = 3
         self.terminations.task_success.params["asset_cfg"].body_names = [self.base_link_name]
 
         # Curriculums.

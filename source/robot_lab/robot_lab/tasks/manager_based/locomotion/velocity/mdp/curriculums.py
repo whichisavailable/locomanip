@@ -112,6 +112,11 @@ def go2arm_reaching_stages(
     stage3_xy_end_iteration: int = 3000,
     stage2_expand_reach_fraction: float = 0.5,
     stage2_ratio_reach_fraction: float = 0.5,
+    workspace_position_std_stage1_end_iteration: int = 300,
+    workspace_position_std_stage2_end_iteration: int = 700,
+    workspace_position_std_stage1: float = 0.5,
+    workspace_position_std_stage2: float = 0.25,
+    workspace_position_std_stage3: float = 0.1,
     position_range_b_loco_stage: Sequence[float] = (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),
     world_z_range_loco_stage: Sequence[float] = (0.6926649548, 0.6926649548),
     euler_xyz_range_b_loco_stage: Sequence[float] = (0.0, 0.0, 1.5008926535, 1.5008926535, 0.0, 0.0),
@@ -162,6 +167,12 @@ def go2arm_reaching_stages(
     command_cfg = command_term.cfg
     step = int(getattr(env, "common_step_counter", 0))
     current_iteration = float(step) / float(max(steps_per_iteration, 1))
+    if current_iteration < workspace_position_std_stage1_end_iteration:
+        current_workspace_position_std = float(workspace_position_std_stage1)
+    elif current_iteration < workspace_position_std_stage2_end_iteration:
+        current_workspace_position_std = float(workspace_position_std_stage2)
+    else:
+        current_workspace_position_std = float(workspace_position_std_stage3)
 
     if current_iteration < loco_stage_end_iteration:
         stage_progress = _clamp_progress(current_iteration, 0, loco_stage_end_iteration)
@@ -359,7 +370,10 @@ def go2arm_reaching_stages(
     env.cfg.commands.ee_pose.tertiary_sample_prob = current_tertiary_sample_prob
     if hasattr(env.cfg.rewards, total_reward_term_name):
         getattr(env.cfg.rewards, total_reward_term_name).params["gating_fixed_d"] = current_gating_fixed_d
-    env.reward_manager.get_term_cfg(total_reward_term_name).params["gating_fixed_d"] = current_gating_fixed_d
+        getattr(env.cfg.rewards, total_reward_term_name).params["workspace_position_std"] = current_workspace_position_std
+    total_reward_term_cfg = env.reward_manager.get_term_cfg(total_reward_term_name)
+    total_reward_term_cfg.params["gating_fixed_d"] = current_gating_fixed_d
+    total_reward_term_cfg.params["workspace_position_std"] = current_workspace_position_std
 
     env.cfg.events.randomize_reset_joints.params["position_range"] = current_reset_joint_position_range
     env.cfg.events.randomize_reset_joints.params["velocity_range"] = current_reset_joint_velocity_range
