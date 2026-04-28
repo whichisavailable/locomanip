@@ -60,7 +60,6 @@ def _get_go2arm_support_contact_stats(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
     contact_force_threshold: float,
-    support_factor_low: float,
 ) -> dict[str, torch.Tensor]:
     """Cache per-step support-contact statistics reused by reward logging."""
     cache_key = (
@@ -68,7 +67,6 @@ def _get_go2arm_support_contact_stats(
         sensor_cfg.name,
         tuple(int(body_id) for body_id in sensor_cfg.body_ids),
         float(contact_force_threshold),
-        float(support_factor_low),
     )
     cached = getattr(env, "_go2arm_support_contact_cache", None)
     if cached is not None and cached.get("key") == cache_key:
@@ -79,38 +77,12 @@ def _get_go2arm_support_contact_stats(
         raise RuntimeError("Go2Arm support-contact stats require the dedicated foot sensors to be available.")
     in_contact = precise_normal_forces > contact_force_threshold
     support_count = torch.sum(in_contact.float(), dim=1)
-    support_factor = _go2arm_trot_support_factor_from_contacts(
-        in_contact,
-        bad_support_factor=support_factor_low,
-    )
     value = {
         "in_contact": in_contact,
         "support_count": support_count,
-        "support_factor": support_factor,
     }
     env._go2arm_support_contact_cache = {"key": cache_key, "value": value}
     return value
-
-
-def _go2arm_trot_support_factor_from_contacts(
-    in_contact: torch.Tensor,
-    bad_support_factor: float,
-    diag_double_factor: float = 1.0,
-    all_four_factor: float = 0.9,
-) -> torch.Tensor:
-    """Score support pattern for FL, FR, RL, RR contacts."""
-    if in_contact.shape[-1] != 4:
-        raise ValueError("go2arm trot support factor expects exactly four feet ordered as FL, FR, RL, RR.")
-
-    contacts = in_contact.bool()
-    fl, fr, rl, rr = contacts.unbind(dim=1)
-    diag_double = (fl & rr & ~fr & ~rl) | (fr & rl & ~fl & ~rr)
-    all_four = fl & fr & rl & rr
-
-    factor = torch.full((contacts.shape[0],), float(bad_support_factor), dtype=torch.float32, device=contacts.device)
-    factor = torch.where(all_four, float(all_four_factor) * torch.ones_like(factor), factor)
-    factor = torch.where(diag_double, float(diag_double_factor) * torch.ones_like(factor), factor)
-    return factor
 
 
 def _phi_quadratic(value: torch.Tensor, std: float) -> torch.Tensor:
@@ -598,7 +570,6 @@ def feet_contact_soft_trot_reward(
     swing_height: float,
     soft_contact_k: float,
     contact_force_threshold: float = 1.0,
-    support_factor_low: float = 0.25,
     ground_sensor_names: Sequence[str] | None = None,
 ) -> torch.Tensor:
     # 整体结构参考feet-contact reward，但期望接触 c_des 改成软权重。
@@ -658,26 +629,7 @@ def feet_contact_soft_trot_reward(
     stance_term = c_des * in_contact * torch.exp(-(vel_xy**2) / vel_std)
 
     # 四只脚的摆动项和支撑项加总，作为整体步态奖励。
-    support_factor = _go2arm_trot_support_factor_from_contacts(
-        contact_mask,
-        bad_support_factor=support_factor_low,
-    )
-    return torch.sum(swing_term + stance_term, dim=1) * support_factor
-
-
-def feet_contact_soft_trot_support_factor(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    contact_force_threshold: float = 1.0,
-    support_factor_low: float = 0.25,
-) -> torch.Tensor:
-    """Return the support-factor used by the soft-trot reward."""
-    return _get_go2arm_support_contact_stats(
-        env,
-        sensor_cfg=sensor_cfg,
-        contact_force_threshold=contact_force_threshold,
-        support_factor_low=support_factor_low,
-    )["support_factor"]
+    return torch.sum(swing_term + stance_term, dim=1)
 
 
 def precise_feet_contact_count(
@@ -690,16 +642,19 @@ def precise_feet_contact_count(
         env,
         sensor_cfg=sensor_cfg,
         contact_force_threshold=contact_force_threshold,
-        support_factor_low=0.25,
     )["support_count"]
 
 
 def diagonal_foot_symmetry_penalty(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
+    contact_force_threshold: float = 1.0,
+    timer_std: float = 0.2,
 ) -> torch.Tensor:
-    """Penalty on diagonal-foot contact and air time mismatch."""
-    precise_timer_data = get_go2arm_precise_foot_contact_timers(env, sensor_cfg=sensor_cfg, threshold=1.0)
+    """Penalty on diagonal-foot contact, force, and timer mismatch."""
+    precise_timer_data = get_go2arm_precise_foot_contact_timers(
+        env, sensor_cfg=sensor_cfg, threshold=contact_force_threshold
+    )
     if precise_timer_data is not None:
         air_time = precise_timer_data["current_air_time"]
         contact_time = precise_timer_data["current_contact_time"]
@@ -708,9 +663,27 @@ def diagonal_foot_symmetry_penalty(
         air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
         contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
 
-    diag_pair_0 = (air_time[:, 0] - air_time[:, 3]) ** 2 + (contact_time[:, 0] - contact_time[:, 3]) ** 2
-    diag_pair_1 = (air_time[:, 1] - air_time[:, 2]) ** 2 + (contact_time[:, 1] - contact_time[:, 2]) ** 2
-    return 0.5 * (diag_pair_0 + diag_pair_1)
+    precise_normal_forces = get_go2arm_precise_foot_normal_forces(env, sensor_cfg=sensor_cfg)
+    if precise_normal_forces is not None:
+        normal_forces = precise_normal_forces
+    else:
+        contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        normal_forces = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
+
+    contact = (normal_forces > contact_force_threshold).float()
+    force_state = torch.clamp(normal_forces / max(float(contact_force_threshold), 1.0e-6), min=0.0, max=1.0)
+    timer_scale = max(float(timer_std) ** 2, 1.0e-6)
+
+    def _pair_penalty(first: int, second: int) -> torch.Tensor:
+        contact_mismatch = torch.square(contact[:, first] - contact[:, second])
+        force_mismatch = torch.square(force_state[:, first] - force_state[:, second])
+        timer_mismatch = (
+            torch.square(air_time[:, first] - air_time[:, second])
+            + torch.square(contact_time[:, first] - contact_time[:, second])
+        ) / timer_scale
+        return 0.5 * contact_mismatch + 0.3 * force_mismatch + 0.2 * timer_mismatch
+
+    return 0.5 * (_pair_penalty(0, 3) + _pair_penalty(1, 2))
 
 
 def _get_go2arm_foot_centers_b(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -878,12 +851,17 @@ def touchdown_left_right_y_symmetry_penalty(env: ManagerBasedRLEnv) -> torch.Ten
 def touchdown_foot_y_distance_penalty(
     env: ManagerBasedRLEnv,
     min_distance: float,
+    max_distance: float | None = None,
 ) -> torch.Tensor:
-    """Penalty on recent touchdown points whose lateral distance to the base center is too small."""
+    """Penalty on recent touchdown points whose lateral distance leaves the target width band."""
     _get_go2arm_touchdown_symmetry_components(env)
     state = env._go2arm_touchdown_symmetry_state
     touchdown_y_distance = torch.abs(state["last_touchdown_positions_b"][..., 1])
-    foot_y_distance = torch.square(torch.clamp(min_distance - touchdown_y_distance, min=0.0))
+    lower_violation = torch.clamp(min_distance - touchdown_y_distance, min=0.0)
+    upper_violation = torch.zeros_like(lower_violation)
+    if max_distance is not None:
+        upper_violation = torch.clamp(touchdown_y_distance - max_distance, min=0.0)
+    foot_y_distance = torch.square(lower_violation) + torch.square(upper_violation)
     valid_foot_count = torch.clamp(state["valid_touchdown"].float().sum(dim=1), min=1.0)
     foot_y_distance = torch.sum(foot_y_distance * state["valid_touchdown"].float(), dim=1) / valid_foot_count
     no_valid_foot = ~torch.any(state["valid_touchdown"], dim=1)
@@ -1678,6 +1656,7 @@ def _compute_go2arm_reward_terms(
     touchdown_foot_y_distance = touchdown_foot_y_distance_penalty(
         env,
         min_distance=params["loco_regularization_touchdown_foot_y_distance_min_distance"],
+        max_distance=params.get("loco_regularization_touchdown_foot_y_distance_max_distance"),
     )
     feet_contact_soft_trot_reward_value = feet_contact_soft_trot_reward(
         env,
@@ -1691,20 +1670,10 @@ def _compute_go2arm_reward_terms(
         swing_height=params["loco_regularization_feet_contact_soft_trot_swing_height"],
         soft_contact_k=params["loco_regularization_feet_contact_soft_trot_soft_contact_k"],
         contact_force_threshold=params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"],
-        support_factor_low=params["loco_regularization_feet_contact_soft_trot_support_factor_low"],
         ground_sensor_names=params["loco_regularization_feet_contact_soft_trot_ground_sensor_names"],
     )
-    feet_contact_soft_trot_support_factor_value = feet_contact_soft_trot_support_factor(
-        env,
-        sensor_cfg=params["loco_regularization_feet_contact_soft_trot_sensor_cfg"],
-        contact_force_threshold=params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"],
-        support_factor_low=params["loco_regularization_feet_contact_soft_trot_support_factor_low"],
-    )
-    feet_contact_soft_trot_reward_pre_support = feet_contact_soft_trot_reward_value / torch.clamp(
-        feet_contact_soft_trot_support_factor_value, min=1.0e-6
-    )
     feet_contact_soft_trot_normalized = torch.clamp(
-        feet_contact_soft_trot_reward_pre_support
+        feet_contact_soft_trot_reward_value
         / float(len(params["loco_regularization_feet_contact_soft_trot_asset_cfg"].body_ids)),
         min=1.0e-6,
         max=1.0,
@@ -1716,6 +1685,7 @@ def _compute_go2arm_reward_terms(
     diagonal_foot_symmetry = diagonal_foot_symmetry_penalty(
         env,
         sensor_cfg=params["loco_regularization_diagonal_foot_symmetry_sensor_cfg"],
+        contact_force_threshold=params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"],
     )
     moving_arm_deviation = moving_arm_default_deviation_penalty(env, asset_cfg=params["loco_arm_swing_asset_cfg"])
     moving_arm_dynamic = moving_arm_joint_velocity_penalty(env, asset_cfg=params["loco_arm_dynamic_asset_cfg"])
@@ -1856,7 +1826,6 @@ def _compute_go2arm_reward_terms(
         "touchdown_left_right_y_symmetry_penalty": touchdown_left_right_y_symmetry_weighted,
         "touchdown_foot_y_distance_penalty": touchdown_foot_y_distance_weighted,
         "diagonal_foot_symmetry_penalty": diagonal_foot_symmetry_weighted,
-        "feet_contact_soft_trot_support_factor": feet_contact_soft_trot_support_factor_value,
         "feet_contact_soft_trot_weighted_gate": feet_contact_soft_trot_factor,
         "loco_regularization_base_raw": loco_regularization_base_raw,
         "loco_regularization": loco_regularization,
@@ -1978,6 +1947,7 @@ def total_reward(
     loco_regularization_touchdown_foot_y_distance_weight: object = None,
     loco_regularization_touchdown_foot_y_distance_std: object = None,
     loco_regularization_touchdown_foot_y_distance_min_distance: object = None,
+    loco_regularization_touchdown_foot_y_distance_max_distance: object = None,
     loco_regularization_diagonal_foot_symmetry_weight: object = None,
     loco_regularization_diagonal_foot_symmetry_std: object = None,
     loco_regularization_diagonal_foot_symmetry_sensor_cfg: object = None,
@@ -1992,7 +1962,6 @@ def total_reward(
     loco_regularization_feet_contact_soft_trot_swing_height: object = None,
     loco_regularization_feet_contact_soft_trot_soft_contact_k: object = None,
     loco_regularization_feet_contact_soft_trot_contact_force_threshold: object = None,
-    loco_regularization_feet_contact_soft_trot_support_factor_low: object = None,
     loco_regularization_feet_contact_soft_trot_ground_sensor_names: object = None,
     loco_arm_swing_weight: object = None,
     loco_arm_swing_asset_cfg: object = None,
@@ -2116,6 +2085,7 @@ def total_reward(
         loco_regularization_touchdown_foot_y_distance_weight,
         loco_regularization_touchdown_foot_y_distance_std,
         loco_regularization_touchdown_foot_y_distance_min_distance,
+        loco_regularization_touchdown_foot_y_distance_max_distance,
         loco_regularization_diagonal_foot_symmetry_weight,
         loco_regularization_diagonal_foot_symmetry_std,
         loco_regularization_diagonal_foot_symmetry_sensor_cfg,
@@ -2130,7 +2100,6 @@ def total_reward(
         loco_regularization_feet_contact_soft_trot_swing_height,
         loco_regularization_feet_contact_soft_trot_soft_contact_k,
         loco_regularization_feet_contact_soft_trot_contact_force_threshold,
-        loco_regularization_feet_contact_soft_trot_support_factor_low,
         loco_regularization_feet_contact_soft_trot_ground_sensor_names,
         loco_arm_swing_weight,
         loco_arm_swing_asset_cfg,
@@ -2735,28 +2704,44 @@ def feet_slide(
     return reward
 
 
+def _effective_action_history(env: ManagerBasedRLEnv) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    """Return action history after environment-side action masks when available."""
+    current = getattr(env, "_go2arm_effective_action", None)
+    previous = getattr(env, "_go2arm_prev_effective_action", None)
+    previous_previous = getattr(env, "_go2arm_prev_prev_effective_action", None)
+    if current is not None and previous is not None:
+        return current, previous, previous_previous
+    return (
+        env.action_manager.action,
+        env.action_manager.prev_action,
+        getattr(env.action_manager, "prev_prev_action", None),
+    )
+
+
 def action_smoothness_first_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalty on first-order action changes."""
     # 一阶平滑项：惩罚当前动作和上一步动作之间的跳变。
-    diff = torch.square(env.action_manager.action - env.action_manager.prev_action)
+    action, prev_action, _ = _effective_action_history(env)
+    diff = torch.square(action - prev_action)
     # 第一步没有有效上一时刻动作时，不对这一项计惩罚。
-    diff = diff * (env.action_manager.prev_action[:, :] != 0)
+    diff = diff * (prev_action[:, :] != 0)
     return torch.sum(diff, dim=1)
 
 
 def action_smoothness_second_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalty on second-order action changes."""
     # 二阶平滑项：惩罚动作离散二阶差分，抑制动作抖动和“折线感”。
-    if not hasattr(env.action_manager, "prev_prev_action"):
+    action, prev_action, prev_prev_action = _effective_action_history(env)
+    if prev_prev_action is None:
         # 兼容旧版 IsaacLab：ActionManager 只维护一阶历史时，无法可靠计算二阶差分，
         # 因此这里返回零惩罚而不是伪造历史，避免改变奖励语义。
         return torch.zeros(env.num_envs, device=env.device)
     diff = torch.square(
-        env.action_manager.action - 2 * env.action_manager.prev_action + env.action_manager.prev_prev_action
+        action - 2 * prev_action + prev_prev_action
     )
     # 前两步历史不足时，不对二阶项计惩罚。
-    diff = diff * (env.action_manager.prev_action[:, :] != 0)
-    diff = diff * (env.action_manager.prev_prev_action[:, :] != 0)
+    diff = diff * (prev_action[:, :] != 0)
+    diff = diff * (prev_prev_action[:, :] != 0)
     return torch.sum(diff, dim=1)
 
 

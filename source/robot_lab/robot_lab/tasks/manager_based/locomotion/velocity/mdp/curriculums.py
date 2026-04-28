@@ -124,9 +124,11 @@ def go2arm_reaching_stages(
     position_range_b_stage1: Sequence[float] = (0.10, 0.24, -0.12, 0.12, 0.0, 0.0),
     position_range_b_stage2_allowed_start: Sequence[float] = (0.08, 0.30, -0.14, 0.14, 0.0, 0.0),
     position_range_b_stage3: Sequence[float] = (0.05, 2.00, -0.35, 0.35, 0.0, 0.0),
+    world_z_range_stage1_start: Sequence[float] | None = None,
     world_z_range_stage1: Sequence[float] = (0.85, 0.95),
     world_z_range_stage2_allowed_start: Sequence[float] = (0.70, 1.06),
     world_z_range_stage3: Sequence[float] = (0.02, 1.20),
+    euler_xyz_range_b_stage1_start: Sequence[float] | None = None,
     euler_xyz_range_b_stage1: Sequence[float] = (-0.50, 0.50, -0.50, 0.50, -3.14159, 3.14159),
     euler_xyz_range_b_stage2_allowed: Sequence[float] = (-0.50, 0.50, -0.50, 0.50, -3.14159, 3.14159),
     euler_xyz_range_b_stage3: Sequence[float] = (-0.50, 0.50, -0.50, 0.50, -3.14159, 3.14159),
@@ -202,8 +204,16 @@ def go2arm_reaching_stages(
             )
         else:
             current_position_range_b = tuple(float(v) for v in position_range_b_stage1)
-        current_euler_xyz_range_b = tuple(float(v) for v in euler_xyz_range_b_stage1)
-        current_world_z_range = tuple(float(v) for v in world_z_range_stage1)
+        if euler_xyz_range_b_stage1_start is not None:
+            current_euler_xyz_range_b = _lerp_tuple(
+                euler_xyz_range_b_stage1_start, euler_xyz_range_b_stage1, stage_progress
+            )
+        else:
+            current_euler_xyz_range_b = tuple(float(v) for v in euler_xyz_range_b_stage1)
+        if world_z_range_stage1_start is not None:
+            current_world_z_range = _lerp_tuple(world_z_range_stage1_start, world_z_range_stage1, stage_progress)
+        else:
+            current_world_z_range = tuple(float(v) for v in world_z_range_stage1)
         current_secondary_position_range_b = None
         current_secondary_euler_xyz_range_b = None
         current_secondary_world_z_range = None

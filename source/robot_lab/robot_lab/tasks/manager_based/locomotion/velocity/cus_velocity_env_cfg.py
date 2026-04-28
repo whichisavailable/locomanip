@@ -323,6 +323,15 @@ class Go2ArmDefaultDeltaJointPositionAction(joint_actions.JointPositionAction):
             if current_iteration < float(self.cfg.fixed_delta_action_until_iteration):
                 effective_actions = actions.clone()
                 effective_actions[:, self._fixed_delta_action_joint_ids] = float(self.cfg.fixed_delta_action_value)
+        prev_effective_action = getattr(self._env, "_go2arm_effective_action", None)
+        prev_prev_effective_action = getattr(self._env, "_go2arm_prev_effective_action", None)
+        if prev_effective_action is None:
+            prev_effective_action = torch.zeros_like(effective_actions)
+        if prev_prev_effective_action is None:
+            prev_prev_effective_action = torch.zeros_like(effective_actions)
+        self._env._go2arm_prev_prev_effective_action = prev_prev_effective_action.clone()
+        self._env._go2arm_prev_effective_action = prev_effective_action.clone()
+        self._env._go2arm_effective_action = effective_actions.detach().clone()
         self._raw_actions[:] = effective_actions
         delta_actions = self._raw_actions
         if self._delta_clip is not None:
@@ -330,6 +339,19 @@ class Go2ArmDefaultDeltaJointPositionAction(joint_actions.JointPositionAction):
             delta_actions = torch.clamp(delta_actions, min=self._delta_clip[:, :, 0], max=self._delta_clip[:, :, 1])
         # 最终目标保持为：default_joint_pos + delta_action，不再额外乘一个 scale。
         self._processed_actions = delta_actions + self._offset
+
+    def reset(self, env_ids=None):
+        super().reset(env_ids)
+        if env_ids is None:
+            env_ids = slice(None)
+        for attr_name in (
+            "_go2arm_effective_action",
+            "_go2arm_prev_effective_action",
+            "_go2arm_prev_prev_effective_action",
+        ):
+            value = getattr(self._env, attr_name, None)
+            if value is not None:
+                value[env_ids] = 0.0
 
 
 @configclass
@@ -403,6 +425,7 @@ class Go2ArmTeacherCoreObsCfg(ObsGroup):
     # 上一步动作。
     actions = ObsTerm(
         func=mdp.last_action,
+        params={"action_name": "joint_pos"},
         clip=(-100.0, 100.0),
         scale=1.0,
     )
@@ -873,6 +896,7 @@ class RewardsCfg:
             "loco_regularization_touchdown_foot_y_distance_weight": 0.0,
             "loco_regularization_touchdown_foot_y_distance_std": 0.03,
             "loco_regularization_touchdown_foot_y_distance_min_distance": 0.12,
+            "loco_regularization_touchdown_foot_y_distance_max_distance": None,
             # 软 trot 足端接触规律正则权重。
             "loco_regularization_feet_contact_soft_trot_weight": 0.0,
             # soft trot 正则读取的足端接触传感器。
@@ -899,7 +923,6 @@ class RewardsCfg:
             "loco_regularization_feet_contact_soft_trot_soft_contact_k": 10.0,
             # 认为“接触成立”的接触力阈值。
             "loco_regularization_feet_contact_soft_trot_contact_force_threshold": 1.0,
-            "loco_regularization_feet_contact_soft_trot_support_factor_low": 0.25,
             # soft trot 判断地面高度所用的四个足端扫描器。
             "loco_regularization_feet_contact_soft_trot_ground_sensor_names": GO2ARM_FOOT_SCANNER_NAMES,
             # 机械臂摆动正则权重，用于约束 locomotion 阶段的 arm 动作幅度。

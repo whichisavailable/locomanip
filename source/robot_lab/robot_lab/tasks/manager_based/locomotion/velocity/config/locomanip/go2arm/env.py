@@ -42,6 +42,9 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         "mani_regularization_raw",
         "mani_regularization",
         "ee_tracking_potential",
+    }
+
+    _GO2ARM_MANI_UNMASKED_TERMS = {
         "workspace_position_penalty",
     }
 
@@ -62,7 +65,6 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         "touchdown_left_right_y_symmetry_penalty",
         "touchdown_foot_y_distance_penalty",
         "diagonal_foot_symmetry_penalty",
-        "feet_contact_soft_trot_support_factor",
         "feet_contact_soft_trot_weighted_gate",
         "loco_regularization_base_raw",
         "loco_regularization",
@@ -107,7 +109,6 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         "touchdown_left_right_y_symmetry_penalty",
         "touchdown_foot_y_distance_penalty",
         "diagonal_foot_symmetry_penalty",
-        "feet_contact_soft_trot_support_factor",
         "feet_contact_soft_trot_weighted_gate",
         "loco_regularization_base_raw",
         "loco_regularization",
@@ -175,7 +176,7 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
     def _reward_log_key(self, term_name: str) -> str:
         if term_name in self._GO2ARM_TRACKING_TERMS:
             group = "tracking"
-        elif term_name in self._GO2ARM_MANI_MASKED_TERMS:
+        elif term_name in self._GO2ARM_MANI_MASKED_TERMS or term_name in self._GO2ARM_MANI_UNMASKED_TERMS:
             group = "mani"
         elif term_name in self._GO2ARM_LOCO_MASKED_TERMS:
             group = "loco"

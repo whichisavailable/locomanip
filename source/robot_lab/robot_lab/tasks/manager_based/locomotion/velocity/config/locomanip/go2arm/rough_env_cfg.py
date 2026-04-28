@@ -23,7 +23,7 @@ from robot_lab.tasks.manager_based.locomotion.velocity.cus_velocity_env_cfg impo
 )
 
 
-GO2ARM_LOCO_STAGE_END_ITERATION = 1000
+GO2ARM_LOCO_STAGE_END_ITERATION = 800
 
 
 @configclass
@@ -235,15 +235,15 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "command_name": "ee_pose",
                 "steps_per_iteration": 24,
                 "loco_stage_end_iteration": self.go2arm_loco_stage_end_iteration,
-                "stage1_end_iteration": 2000,
+                "stage1_end_iteration": 1200,
                 "stage2_hold_end_iteration": 2500,
                 "stage2_expand_end_iteration": 3000,
                 "stage2_ratio_end_iteration": 3500,
                 "stage3_xy_end_iteration": 4000,
                 "stage2_expand_reach_fraction": 0.5,
                 "stage2_ratio_reach_fraction": 0.5,
-                "workspace_position_std_stage1_end_iteration": 300,
-                "workspace_position_std_stage2_end_iteration": 700,
+                "workspace_position_std_stage1_end_iteration": 200,
+                "workspace_position_std_stage2_end_iteration": 400,
                 "workspace_position_std_stage1": 0.5,
                 "workspace_position_std_stage2": 0.25,
                 "workspace_position_std_stage3": 0.1,
@@ -254,9 +254,11 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "position_range_b_stage1": stage1_position_range_b,
                 "position_range_b_stage2_allowed_start": stage2_position_range_b,
                 "position_range_b_stage3": stage3_position_range_b,
+                "world_z_range_stage1_start": loco_stage_world_z_range,
                 "world_z_range_stage1": (0.45, 0.6),
                 "world_z_range_stage2_allowed_start": (0.30, 0.7),
                 "world_z_range_stage3": (0.1, 1.0),
+                "euler_xyz_range_b_stage1_start": loco_stage_euler_xyz_range_b,
                 "euler_xyz_range_b_stage1": stage1_euler_xyz_range_b,
                 "euler_xyz_range_b_stage2_allowed": stage2_euler_xyz_range_b,
                 "euler_xyz_range_b_stage3": stage3_euler_xyz_range_b,
@@ -360,9 +362,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["workspace_position_std"] = 0.5
         self.rewards.total_reward.params.pop("workspace_position_clip_max", None)
         # 继续保留轻度高度约束，但当前主要问题更偏向前倾和竖直速度，因此高度项不额外拉太高。
-        self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.03
+        self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.08
         self.rewards.total_reward.params["loco_regularization_base_height_std"] = 0.05
-        self.rewards.total_reward.params["loco_regularization_base_height_target_height"] = 0.4
+        self.rewards.total_reward.params["loco_regularization_base_height_target_height"] = 0.45
         self.rewards.total_reward.params["loco_regularization_base_roll_weight"] = 0.12
         self.rewards.total_reward.params["loco_regularization_base_roll_std"] = 0.1
         # 日志里 base_pitch 持续偏大，适当加重前后俯仰约束。
@@ -404,7 +406,8 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["loco_regularization_touchdown_left_right_y_symmetry_std"] = 0.03
         self.rewards.total_reward.params["loco_regularization_touchdown_foot_y_distance_weight"] = 0.1
         self.rewards.total_reward.params["loco_regularization_touchdown_foot_y_distance_std"] = 0.03
-        self.rewards.total_reward.params["loco_regularization_touchdown_foot_y_distance_min_distance"] = 0.15
+        self.rewards.total_reward.params["loco_regularization_touchdown_foot_y_distance_min_distance"] = 0.17
+        self.rewards.total_reward.params["loco_regularization_touchdown_foot_y_distance_max_distance"] = 0.25
         self.rewards.total_reward.params["loco_regularization_diagonal_foot_symmetry_weight"] = 0.2
         self.rewards.total_reward.params["loco_regularization_diagonal_foot_symmetry_std"] = 0.05
         self.rewards.total_reward.params["loco_regularization_diagonal_foot_symmetry_sensor_cfg"] = (
@@ -415,14 +418,13 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_force_std"] = 1.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_height_std"] = 0.0025
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_vel_std"] = 0.01
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.40
+        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_cycle_time"] = 0.50
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_phase_offsets"] = (
             GO2ARM_TROT_PHASE_OFFSETS
         )
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_swing_height"] = 0.10
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_soft_contact_k"] = 6.0
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"] = 2.0
-        self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_support_factor_low"] = 0.5
         self.rewards.total_reward.params["loco_tracking_std"] = 0.5
         self.rewards.total_reward.params["loco_tracking_threshold"] = 0.05
         self.rewards.total_reward.params["loco_tracking_weight"] = 5.0
