@@ -11,7 +11,6 @@ from isaaclab_rl.rsl_rl import (
 )
 
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.rough_env_cfg import (
-    GO2ARM_LOCO_STAGE_END_ITERATION,
     UnitreeGo2ArmRoughEnvCfg,
 )
 from robot_lab.tasks.manager_based.locomotion.velocity.mdp.symmetry import go2arm
@@ -35,7 +34,7 @@ class UnitreeGo2ArmRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 20000
     save_interval = 50
     experiment_name = "unitree_go2arm_rough"
-    go2arm_mani_phase_reset_iteration = GO2ARM_LOCO_STAGE_END_ITERATION
+    go2arm_mani_phase_reset_iteration = None
     go2arm_mani_phase_reset_arm_action_indices = tuple(range(12, 18))
     go2arm_mani_phase_reset_arm_std = 0.4
     go2arm_mani_phase_reset_learning_rate = 3.0e-4
@@ -72,7 +71,7 @@ class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 20000
     save_interval = 50
     experiment_name = "unitree_go2arm_teacher_rough"
-    go2arm_mani_phase_reset_iteration = GO2ARM_LOCO_STAGE_END_ITERATION
+    go2arm_mani_phase_reset_iteration = None
     go2arm_mani_phase_reset_arm_action_indices = tuple(range(12, 18))
     go2arm_mani_phase_reset_arm_std = 0.4
     go2arm_mani_phase_reset_learning_rate = 3.0e-4
