@@ -23,7 +23,7 @@ from robot_lab.tasks.manager_based.locomotion.velocity.cus_velocity_env_cfg impo
 )
 
 
-GO2ARM_LOCO_STAGE_END_ITERATION = 800
+GO2ARM_LOCO_STAGE_END_ITERATION = 500
 
 
 @configclass
@@ -59,7 +59,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     reward_log_interval_iterations: int = 1
     reward_log_steps_per_iteration: int = 24
     go2arm_loco_stage_end_iteration: int = GO2ARM_LOCO_STAGE_END_ITERATION
-    go2arm_default_link6_world_z: float = 0.6926649548
+    go2arm_default_link6_world_z: float = 0.7126649548
     go2arm_default_link6_pitch_b: float = 1.5008926535
     enable_debug_reward_logging: bool = True
     enable_collision_group_logging: bool = False
@@ -95,14 +95,12 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Confirmed 18D absolute joint-position action target.
         self.actions = Go2ArmTeacherActionsCfg()
         self.actions.joint_pos.delta_clip = {
-            "^(FL|FR|RL|RR)_hip_joint$": (-0.62832, 0.62832),
-            "^(FL|FR)_thigh_joint$": (-1.42248, 1.61442),
-            "^(RL|RR)_thigh_joint$": (-0.79416, 2.24274),
-            "^(FL|FR|RL|RR)_calf_joint$": (-0.73362, 0.39734),
-            # 机械臂 6 个关节按 URDF 原始 position limits，
-            # 先乘 asset 里的 soft_joint_pos_limit_factor=0.9 得到软限位，
-            # 再从默认姿态出发只开放到软限位剩余空间的 60%，
-            # 这样既保留足够的 reaching 工作空间，也避免联训初期大动作把底盘拉翻。
+            "^(FL|FR|RL|RR)_hip_joint$": (-0.83776, 0.83776),
+            "^(FL|FR)_thigh_joint$": (-1.86465, 2.18455),
+            "^(RL|RR)_thigh_joint$": (-0.81745, 3.23175),
+            "^(FL|FR|RL|RR)_calf_joint$": (-1.03421, 0.47375),
+            # Arm delta clips also use the middle 80% of each URDF joint limit,
+            # converted to deltas from the default pose.
             "^joint1$": (-2.0944, 2.0944),
             "^joint2$": (0.0, 2.512),
             "^joint3$": (-2.3736, 0.0),
@@ -123,22 +121,20 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.commands.ee_pose.orientation_error_weight = 0.1
 
         # go2arm staged curriculum:
-        # 0) loco-only warmup: fixed arm delta action, fixed default world z, gate_d=1;
-        # 1) near safe manipulation: learn stable reaching around the initial forward box;
-        # 2) hard z commands: introduce low/high z extreme samples and expand their ranges;
-        # 3) global expansion: gradually enlarge xy while sampling z over the full range.
+        # 0) 0-500: loco-only warmup with fixed arm delta action and fixed default link6 world z.
+        # 1) 500-1000: arm fine-tuning while z and orientation ranges expand.
+        # 2) 1000-2000: fixed z range with low/high-z secondary command samples.
+        # 3) 2000-3000: increase secondary sample probabilities.
+        # 4) 3000+: disable secondary sampling and use the full z range.
         #
         # Loco-only stage keeps link6 near its default world z:
-        # root/base height 0.4 + URDF FK base_link->link6 z 0.2926649548 = 0.6926649548.
-        # stage1 围绕默认工作点给一个近端安全盒。
-        # 这里改成混合采样：
+        # base_link height 0.42 + URDF FK base_link->link6 z 0.2926649548 = 0.7126649548.
+        # Use mixed sampling:
         #   - xy 在 base frame 下采样，保证“前/后/左/右”的语义始终跟随机身；
         #   - z 在 world frame 下采样，便于直接围绕地面高度组织课程。
-        # 高 z 世界系上界按 go2arm URDF 软限位(0.9)下的随机前向可达样本估计：
-        #   在 x∈[0.12, 0.30], |y|<=0.12 的前向窗口内，局部 z 的 99.5% 分位约为 0.8076，
-        #   再加 nominal base height≈0.4m，取 world z 上界 1.20。
-        # Start from forward targets so the error-gated reward naturally emphasizes locomotion first.
-        loco_stage_position_range_b = (0.70, 1.20, 0.0, 0.0, 0.0, 0.0)
+        # Keep all command x ranges fixed at 0.40-1.60 and y fixed at 0.0.
+        fixed_forward_position_range_b = (0.40, 1.60, 0.0, 0.0, 0.0, 0.0)
+        loco_stage_position_range_b = fixed_forward_position_range_b
         loco_stage_world_z_range = (self.go2arm_default_link6_world_z, self.go2arm_default_link6_world_z)
         loco_stage_euler_xyz_range_b = (
             0.0,
@@ -148,9 +144,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             0.0,
             0.0,
         )
-        stage1_position_range_b = (0.70, 1.60, 0.0, 0.0, 0.0, 0.0)
-        stage2_position_range_b = (0.45, 2.20, 0.0, 0.0, 0.0, 0.0)
-        stage3_position_range_b = (0.25, 2.50, 0.0, 0.0, 0.0, 0.0)
+        stage1_position_range_b = fixed_forward_position_range_b
+        stage2_position_range_b = fixed_forward_position_range_b
+        stage3_position_range_b = fixed_forward_position_range_b
         # Fixed orientation range: keep targets inside the wrist workspace that remains practical with
         # the arm action range clipped to about 80% of the joint limits.
         stage3_euler_xyz_range_b = (-0.35, 0.35, -0.35, 0.35, -1.20, 1.20)
@@ -218,13 +214,13 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         del target_pos_range, target_yaw_range
         root_reset_x_half_range = 0.02
         root_reset_y_half_range = 0.02
-        root_reset_yaw_half_range = 0.08
+        root_reset_yaw_half_range = 0.0
         self.events.randomize_reset_base.params["pose_range"] = {
             "x": (-root_reset_x_half_range, root_reset_x_half_range),
             "y": (-root_reset_y_half_range, root_reset_y_half_range),
             "yaw": (-root_reset_yaw_half_range, root_reset_yaw_half_range),
         }
-        self.events.randomize_reset_joints.params["position_range"] = (-0.01, 0.01)
+        self.events.randomize_reset_joints.params["position_range"] = (-0.02, 0.02)
         self.events.randomize_reset_joints.params["velocity_range"] = (-0.02, 0.02)
 
         # Curriculum.
@@ -235,50 +231,50 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "command_name": "ee_pose",
                 "steps_per_iteration": 24,
                 "loco_stage_end_iteration": self.go2arm_loco_stage_end_iteration,
-                "stage1_end_iteration": 1200,
-                "stage2_hold_end_iteration": 2500,
-                "stage2_expand_end_iteration": 3000,
-                "stage2_ratio_end_iteration": 3500,
-                "stage3_xy_end_iteration": 4000,
-                "stage2_expand_reach_fraction": 0.5,
-                "stage2_ratio_reach_fraction": 0.5,
-                "workspace_position_std_stage1_end_iteration": 200,
-                "workspace_position_std_stage2_end_iteration": 400,
-                "workspace_position_std_stage1": 0.5,
-                "workspace_position_std_stage2": 0.25,
+                "stage1_end_iteration": 1000,
+                "stage2_hold_end_iteration": 2000,
+                "stage2_expand_end_iteration": 2000,
+                "stage2_ratio_end_iteration": 3000,
+                "stage3_xy_end_iteration": 3000,
+                "stage2_expand_reach_fraction": 1.0,
+                "stage2_ratio_reach_fraction": 1.0,
+                "workspace_position_std_stage1_end_iteration": 0,
+                "workspace_position_std_stage2_end_iteration": 0,
+                "workspace_position_std_stage1": 0.1,
+                "workspace_position_std_stage2": 0.1,
                 "workspace_position_std_stage3": 0.1,
                 "position_range_b_loco_stage": loco_stage_position_range_b,
                 "world_z_range_loco_stage": loco_stage_world_z_range,
                 "euler_xyz_range_b_loco_stage": loco_stage_euler_xyz_range_b,
-                "position_range_b_stage1_start": (0.70, 1.20, 0.0, 0.0, 0.0, 0.0),
+                "position_range_b_stage1_start": fixed_forward_position_range_b,
                 "position_range_b_stage1": stage1_position_range_b,
                 "position_range_b_stage2_allowed_start": stage2_position_range_b,
                 "position_range_b_stage3": stage3_position_range_b,
                 "world_z_range_stage1_start": loco_stage_world_z_range,
-                "world_z_range_stage1": (0.45, 0.6),
-                "world_z_range_stage2_allowed_start": (0.30, 0.7),
-                "world_z_range_stage3": (0.1, 1.0),
+                "world_z_range_stage1": (0.45, 0.75),
+                "world_z_range_stage2_allowed_start": (0.40, 0.80),
+                "world_z_range_stage3": (0.10, 1.10),
                 "euler_xyz_range_b_stage1_start": loco_stage_euler_xyz_range_b,
                 "euler_xyz_range_b_stage1": stage1_euler_xyz_range_b,
                 "euler_xyz_range_b_stage2_allowed": stage2_euler_xyz_range_b,
                 "euler_xyz_range_b_stage3": stage3_euler_xyz_range_b,
-                "position_range_b_hard_low_start": (0.45, 2.20, 0.0, 0.0, 0.0, 0.0),
-                "position_range_b_hard_low_final": (0.35, 2.50, 0.0, 0.0, 0.0, 0.0),
-                "world_z_range_hard_low_start": (0.20, 0.35),
-                "world_z_range_hard_low_final": (0.1, 0.35),
-                "position_range_b_hard_high_start": (0.45, 2.20, 0.0, 0.0, 0.0, 0.0),
-                "position_range_b_hard_high_final": (0.35, 2.50, 0.0, 0.0, 0.0, 0.0),
-                "world_z_range_hard_high_start": (0.8, 0.9),
-                "world_z_range_hard_high_final": (0.8, 1),
+                "position_range_b_hard_low_start": fixed_forward_position_range_b,
+                "position_range_b_hard_low_final": fixed_forward_position_range_b,
+                "world_z_range_hard_low_start": (0.10, 0.40),
+                "world_z_range_hard_low_final": (0.10, 0.40),
+                "position_range_b_hard_high_start": fixed_forward_position_range_b,
+                "position_range_b_hard_high_final": fixed_forward_position_range_b,
+                "world_z_range_hard_high_start": (0.80, 1.10),
+                "world_z_range_hard_high_final": (0.80, 1.10),
                 "euler_xyz_range_b_hard_low": stage3_euler_xyz_range_b,
                 "euler_xyz_range_b_hard_high": stage3_euler_xyz_range_b,
                 "hard_low_sample_prob_stage2_base": 0.08,
                 "hard_high_sample_prob_stage2_base": 0.08,
                 "hard_low_sample_prob_stage2_final": 0.20,
-                "hard_high_sample_prob_stage2_final": 0.15,
-                "reset_joint_position_range_stage1": (-0.01, 0.01),
+                "hard_high_sample_prob_stage2_final": 0.20,
+                "reset_joint_position_range_stage1": (-0.02, 0.02),
                 "reset_joint_position_range_stage2": (-0.02, 0.02),
-                "reset_joint_position_range_stage3": (-0.04, 0.04),
+                "reset_joint_position_range_stage3": (-0.02, 0.02),
                 "reset_joint_velocity_range_stage1": (-0.02, 0.02),
                 "reset_joint_velocity_range_stage2": (-0.03, 0.03),
                 "reset_joint_velocity_range_stage3": (-0.05, 0.05),
@@ -289,8 +285,14 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
                 "reset_root_y_range_stage2": (-0.03, 0.03),
                 "reset_root_y_range_stage3": (-0.06, 0.06),
                 "reset_root_yaw_range_stage1": (-root_reset_yaw_half_range, root_reset_yaw_half_range),
-                "reset_root_yaw_range_stage2": (-0.10, 0.10),
-                "reset_root_yaw_range_stage3": (-0.18, 0.18),
+                "reset_root_yaw_range_stage2": (0.0, 0.0),
+                "reset_root_yaw_range_stage3": (0.0, 0.0),
+                # Keep normal trot protected early, then relax base_link height termination when
+                # low-z reaching samples are introduced in stage 2.
+                "base_height_termination_soft_normal": 0.29,
+                "base_height_termination_hard_normal": 0.25,
+                "base_height_termination_soft_low": 0.25,
+                "base_height_termination_hard_low": 0.22,
             },
         )
 
@@ -336,9 +338,9 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["mani_regularization_min_base_height_sensor_cfg"] = (
             self.rewards.total_reward.params["loco_regularization_base_height_sensor_cfg"]
         )
-        self.rewards.total_reward.params["mani_regularization_min_base_height_minimum_height"] = 0.20
+        self.rewards.total_reward.params["mani_regularization_min_base_height_minimum_height"] = 0.29
         self.rewards.total_reward.params["mani_regularization_min_base_height_std"] = 0.05
-        self.rewards.total_reward.params["mani_regularization_posture_deviation_weight"] = 0.05
+        self.rewards.total_reward.params["mani_regularization_posture_deviation_weight"] = 0.035
         self.rewards.total_reward.params["mani_regularization_posture_deviation_std"] = math.sqrt(6.0) * 0.4
         self.rewards.total_reward.params["mani_regularization_posture_deviation_joint_weights"] = (
             1.0,
@@ -365,12 +367,12 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["workspace_position_x_min"] = 0.30
         self.rewards.total_reward.params["workspace_position_x_max"] = 0.50
         self.rewards.total_reward.params["workspace_position_y_weight"] = 1.0
-        self.rewards.total_reward.params["workspace_position_std"] = 0.5
+        self.rewards.total_reward.params["workspace_position_std"] = 0.1
         self.rewards.total_reward.params.pop("workspace_position_clip_max", None)
         # 继续保留轻度高度约束，但当前主要问题更偏向前倾和竖直速度，因此高度项不额外拉太高。
         self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.08
         self.rewards.total_reward.params["loco_regularization_base_height_std"] = 0.05
-        self.rewards.total_reward.params["loco_regularization_base_height_target_height"] = 0.45
+        self.rewards.total_reward.params["loco_regularization_base_height_target_height"] = 0.42
         self.rewards.total_reward.params["loco_regularization_base_roll_weight"] = 0.16
         self.rewards.total_reward.params["loco_regularization_base_roll_std"] = 0.1
         # 日志里 base_pitch 持续偏大，适当加重前后俯仰约束。
@@ -462,8 +464,8 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.base_orientation_termination.params["consecutive_steps"] = 3
         self.terminations.base_height_termination.params["asset_cfg"].body_names = [self.base_link_name]
         # 当前主要 termination 已经从力矩切换为 base_height，先略微放宽高度边界，避免过早截断稳定化学习。
-        self.terminations.base_height_termination.params["soft_minimum_height"] = 0.20
-        self.terminations.base_height_termination.params["hard_minimum_height"] = 0.16
+        self.terminations.base_height_termination.params["soft_minimum_height"] = 0.29
+        self.terminations.base_height_termination.params["hard_minimum_height"] = 0.25
         self.terminations.base_height_termination.params["consecutive_steps"] = 3
         self.terminations.joint_position_termination.params["soft_max_violation"] = 0.15
         self.terminations.joint_position_termination.params["hard_max_violation"] = 0.30

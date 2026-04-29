@@ -161,6 +161,10 @@ def go2arm_reaching_stages(
     reset_root_yaw_range_stage1: Sequence[float] = (-0.06, 0.06),
     reset_root_yaw_range_stage2: Sequence[float] = (-0.10, 0.10),
     reset_root_yaw_range_stage3: Sequence[float] = (-0.18, 0.18),
+    base_height_termination_soft_normal: float | None = None,
+    base_height_termination_hard_normal: float | None = None,
+    base_height_termination_soft_low: float | None = None,
+    base_height_termination_hard_low: float | None = None,
 ) -> torch.Tensor:
     """go2arm staged curriculum: optional loco-only warmup, then manipulation range expansion."""
     del env_ids
@@ -195,6 +199,7 @@ def go2arm_reaching_stages(
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage1)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage1)
         current_gating_fixed_d = 1.0
+        current_height_termination_progress = 0.0
         stage_value = stage_progress
     elif current_iteration < stage1_end_iteration:
         stage_progress = _clamp_progress(current_iteration, loco_stage_end_iteration, stage1_end_iteration)
@@ -228,6 +233,7 @@ def go2arm_reaching_stages(
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage1)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage1)
         current_gating_fixed_d = None
+        current_height_termination_progress = 0.0
         stage_value = 1.0 + stage_progress
     elif current_iteration < stage2_hold_end_iteration:
         stage_progress = _clamp_progress(current_iteration, stage1_end_iteration, stage2_hold_end_iteration)
@@ -254,6 +260,7 @@ def go2arm_reaching_stages(
             reset_root_yaw_range_stage1, reset_root_yaw_range_stage2, stage_progress
         )
         current_gating_fixed_d = None
+        current_height_termination_progress = stage_progress
         stage_value = 2.0 + stage_progress
     elif current_iteration < stage2_expand_end_iteration:
         stage_progress = _frontloaded_progress(
@@ -290,6 +297,7 @@ def go2arm_reaching_stages(
             reset_root_yaw_range_stage1, reset_root_yaw_range_stage2, stage_progress
         )
         current_gating_fixed_d = None
+        current_height_termination_progress = 1.0
         stage_value = 3.0 + stage_progress
     elif current_iteration < stage2_ratio_end_iteration:
         stage_progress = _frontloaded_progress(
@@ -316,6 +324,7 @@ def go2arm_reaching_stages(
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage2)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage2)
         current_gating_fixed_d = None
+        current_height_termination_progress = 1.0
         stage_value = 4.0 + stage_progress
     else:
         stage_progress = _clamp_progress(current_iteration, stage2_ratio_end_iteration, stage3_xy_end_iteration)
@@ -351,6 +360,7 @@ def go2arm_reaching_stages(
             reset_root_yaw_range_stage2, reset_root_yaw_range_stage3, stage_progress
         )
         current_gating_fixed_d = None
+        current_height_termination_progress = 1.0
         stage_value = 5.0 + stage_progress
 
     command_cfg.position_range_b = current_position_range_b
@@ -384,6 +394,34 @@ def go2arm_reaching_stages(
     total_reward_term_cfg = env.reward_manager.get_term_cfg(total_reward_term_name)
     total_reward_term_cfg.params["gating_fixed_d"] = current_gating_fixed_d
     total_reward_term_cfg.params["workspace_position_std"] = current_workspace_position_std
+
+    if (
+        base_height_termination_soft_normal is not None
+        and base_height_termination_hard_normal is not None
+        and base_height_termination_soft_low is not None
+        and base_height_termination_hard_low is not None
+    ):
+        current_soft_minimum_height = _lerp_value(
+            base_height_termination_soft_normal,
+            base_height_termination_soft_low,
+            current_height_termination_progress,
+        )
+        current_hard_minimum_height = _lerp_value(
+            base_height_termination_hard_normal,
+            base_height_termination_hard_low,
+            current_height_termination_progress,
+        )
+        if hasattr(env.cfg.terminations, "base_height_termination"):
+            env.cfg.terminations.base_height_termination.params["soft_minimum_height"] = current_soft_minimum_height
+            env.cfg.terminations.base_height_termination.params["hard_minimum_height"] = current_hard_minimum_height
+        if hasattr(env, "termination_manager"):
+            try:
+                base_height_term_cfg = env.termination_manager.get_term_cfg("base_height_termination")
+            except Exception:
+                base_height_term_cfg = None
+            if base_height_term_cfg is not None:
+                base_height_term_cfg.params["soft_minimum_height"] = current_soft_minimum_height
+                base_height_term_cfg.params["hard_minimum_height"] = current_hard_minimum_height
 
     env.cfg.events.randomize_reset_joints.params["position_range"] = current_reset_joint_position_range
     env.cfg.events.randomize_reset_joints.params["velocity_range"] = current_reset_joint_velocity_range

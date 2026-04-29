@@ -389,6 +389,22 @@ def moving_arm_joint_velocity_penalty(
     return torch.sum(torch.square(asset.data.joint_vel[:, asset_cfg.joint_ids]), dim=1)
 
 
+def _asset_body_or_root_height_w(asset: RigidObject, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Return selected body height when body_ids are resolved, otherwise articulation root height."""
+    body_ids = getattr(asset_cfg, "body_ids", None)
+    if body_ids is None:
+        return asset.data.root_pos_w[:, 2]
+    try:
+        if len(body_ids) == 0:
+            return asset.data.root_pos_w[:, 2]
+    except TypeError:
+        pass
+    body_height = asset.data.body_pos_w[:, body_ids, 2]
+    if body_height.ndim > 1:
+        body_height = torch.mean(body_height, dim=1)
+    return body_height
+
+
 def base_height_penalty(
     env: ManagerBasedRLEnv,
     std: float,
@@ -398,19 +414,20 @@ def base_height_penalty(
 ) -> torch.Tensor:
     """Penalty on base-height deviation normalized by std."""
     asset: RigidObject = env.scene[asset_cfg.name]
+    body_height = _asset_body_or_root_height_w(asset, asset_cfg)
     if sensor_cfg is not None:
         # 有地形扫描器时，用机身高度减去局部地面高度来构造相对高度误差。
         sensor: RayCaster = env.scene[sensor_cfg.name]
         ray_hits = sensor.data.ray_hits_w[..., 2]
         if torch.isnan(ray_hits).any() or torch.isinf(ray_hits).any() or torch.max(torch.abs(ray_hits)) > 1e6:
             # 扫描结果异常时退化成直接使用世界系机身高度，避免 reward 数值异常。
-            ground_z = asset.data.root_pos_w[:, 2]
+            ground_z = torch.zeros_like(body_height)
         else:
             ground_z = torch.mean(ray_hits, dim=1)
-        height_error = asset.data.root_pos_w[:, 2] - (target_height + ground_z)
+        height_error = body_height - (target_height + ground_z)
     else:
         # 没有地形扫描器时，直接对世界系目标高度做约束。
-        height_error = asset.data.root_pos_w[:, 2] - target_height
+        height_error = body_height - target_height
     # 奖励形式是 phi(h - h_ref, std) = exp(-(h-h_ref)^2 / std)。
     return torch.abs(height_error) / std
 
@@ -423,16 +440,17 @@ def min_base_height_penalty(
 ) -> torch.Tensor:
     """One-sided penalty when base height falls below the minimum height."""
     asset: RigidObject = env.scene[asset_cfg.name]
+    body_height = _asset_body_or_root_height_w(asset, asset_cfg)
     if sensor_cfg is not None:
         sensor: RayCaster = env.scene[sensor_cfg.name]
         ray_hits = sensor.data.ray_hits_w[..., 2]
         if torch.isnan(ray_hits).any() or torch.isinf(ray_hits).any() or torch.max(torch.abs(ray_hits)) > 1e6:
-            ground_z = torch.zeros_like(asset.data.root_pos_w[:, 2])
+            ground_z = torch.zeros_like(body_height)
         else:
             ground_z = torch.mean(ray_hits, dim=1)
-        base_height = asset.data.root_pos_w[:, 2] - ground_z
+        base_height = body_height - ground_z
     else:
-        base_height = asset.data.root_pos_w[:, 2]
+        base_height = body_height
     return torch.clamp(minimum_height - base_height, min=0.0)
 
 

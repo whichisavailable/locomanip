@@ -42,7 +42,19 @@ def _root_height_over_terrain(
     """计算机身相对地面的高度。"""
 
     asset: RigidObject = env.scene[asset_cfg.name]
-    root_height = asset.data.root_pos_w[:, 2]
+    body_ids = getattr(asset_cfg, "body_ids", None)
+    if body_ids is None:
+        root_height = asset.data.root_pos_w[:, 2]
+    else:
+        try:
+            if len(body_ids) == 0:
+                root_height = asset.data.root_pos_w[:, 2]
+            else:
+                root_height = asset.data.body_pos_w[:, body_ids, 2]
+        except TypeError:
+            root_height = asset.data.body_pos_w[:, body_ids, 2]
+        if root_height.ndim > 1:
+            root_height = torch.mean(root_height, dim=1)
 
     if sensor_cfg is not None:
         sensor: RayCaster = env.scene[sensor_cfg.name]
