@@ -305,7 +305,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.ee_tracking_potential.weight = 1.0e-6
 
         self.rewards.total_reward.params["gating_mu"] = 0.65
-        self.rewards.total_reward.params["gating_l"] = 0.9
+        self.rewards.total_reward.params["gating_l"] = 0.45
         self.rewards.total_reward.params["gating_fixed_d"] = 1.0
         self.rewards.total_reward.params["mani_potential_weight"] = 50.0
         # 当前主要问题已经不是生存，而是 reaching 不够积极，因此把跟踪奖励做得更稠密一些。
@@ -354,6 +354,12 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["mani_regularization_support_left_right_x_symmetry_std"] = 0.04
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_weight"] = 0.08
         self.rewards.total_reward.params["mani_regularization_support_left_right_y_symmetry_std"] = 0.03
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_weight"] = 0.08
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_std"] = 0.02
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_x_abs_min"] = 0.10
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_x_abs_max"] = 0.45
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_y_abs_min"] = 0.14
+        self.rewards.total_reward.params["mani_regularization_support_foot_xy_range_y_abs_max"] = 0.28
         self.rewards.total_reward.params["mani_cumulative_error_clip_max"] = 20.0
         self.rewards.total_reward.params["workspace_position_weight"] = 0.5
         self.rewards.total_reward.params["workspace_position_x_min"] = 0.30
@@ -365,10 +371,10 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["loco_regularization_base_height_weight"] = 0.08
         self.rewards.total_reward.params["loco_regularization_base_height_std"] = 0.05
         self.rewards.total_reward.params["loco_regularization_base_height_target_height"] = 0.45
-        self.rewards.total_reward.params["loco_regularization_base_roll_weight"] = 0.12
+        self.rewards.total_reward.params["loco_regularization_base_roll_weight"] = 0.16
         self.rewards.total_reward.params["loco_regularization_base_roll_std"] = 0.1
         # 日志里 base_pitch 持续偏大，适当加重前后俯仰约束。
-        self.rewards.total_reward.params["loco_regularization_base_pitch_weight"] = 0.10
+        self.rewards.total_reward.params["loco_regularization_base_pitch_weight"] = 0.14
         self.rewards.total_reward.params["loco_regularization_base_pitch_std"] = 0.1
         self.rewards.total_reward.params["loco_regularization_base_roll_ang_vel_weight"] = 0.05
         self.rewards.total_reward.params["loco_regularization_base_roll_ang_vel_std"] = 0.5
@@ -451,8 +457,8 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Any non-foot contact contributes to illegal-contact termination.
         self.terminations.non_foot_contact_termination.params["sensor_cfg"].body_names = non_foot_contact_body_regex
         self.terminations.base_orientation_termination.params["asset_cfg"].body_names = [self.base_link_name]
-        self.terminations.base_orientation_termination.params["soft_roll_pitch_limit"] = 0.20
-        self.terminations.base_orientation_termination.params["hard_roll_pitch_limit"] = 0.35
+        self.terminations.base_orientation_termination.params["soft_roll_pitch_limit"] = 0.30
+        self.terminations.base_orientation_termination.params["hard_roll_pitch_limit"] = 0.40
         self.terminations.base_orientation_termination.params["consecutive_steps"] = 3
         self.terminations.base_height_termination.params["asset_cfg"].body_names = [self.base_link_name]
         # 当前主要 termination 已经从力矩切换为 base_height，先略微放宽高度边界，避免过早截断稳定化学习。

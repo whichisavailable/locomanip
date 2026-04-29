@@ -77,8 +77,11 @@ GO2ARM_BASE_BODY_NAME = "base_link"
 # 四个足端 body 名称。
 GO2ARM_FOOT_BODY_NAMES = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
 GO2ARM_FOOT_NAMES = list(GO2ARM_FOOT_BODY_NAMES)
-GO2ARM_CONTACT_SENSOR_PRIM_PATH = "{ENV_REGEX_NS}/Robot/.*(?:FL_foot|FR_foot|RL_foot|RR_foot|base_link|link[1-6])$"
-# 非法接触检测只覆盖足端、base_link 和机械臂主 link，避免腿部辅助碰撞体误触发。
+GO2ARM_CONTACT_SENSOR_PRIM_PATH = (
+    "{ENV_REGEX_NS}/Robot/.*(?:FL_foot|FR_foot|RL_foot|RR_foot|"
+    "(?:FL|FR|RL|RR)_calf(?:_link)?|base_link|link[1-6])$"
+)
+# Global contact covers feet plus selected illegal-contact bodies; dedicated foot sensors still define legal support.
 GO2ARM_NON_FOOT_BODY_REGEX = [r"^(?!.*(?:FL_foot|FR_foot|RL_foot|RR_foot)$).+"]
 # 预设 trot 步态偏置。
 GO2ARM_TROT_PHASE_OFFSETS = (0.0, 0.5, 0.5, 0.0)
@@ -806,6 +809,12 @@ class RewardsCfg:
             "mani_regularization_support_left_right_x_symmetry_std": 0.05,
             "mani_regularization_support_left_right_y_symmetry_weight": 0.0,
             "mani_regularization_support_left_right_y_symmetry_std": 0.05,
+            "mani_regularization_support_foot_xy_range_weight": 0.0,
+            "mani_regularization_support_foot_xy_range_std": 0.02,
+            "mani_regularization_support_foot_xy_range_x_abs_min": 0.0,
+            "mani_regularization_support_foot_xy_range_x_abs_max": None,
+            "mani_regularization_support_foot_xy_range_y_abs_min": 0.0,
+            "mani_regularization_support_foot_xy_range_y_abs_max": None,
             # manipulation 势奖励与累计误差。
             # 势奖励内部使用的命令名。
             "mani_potential_command_name": "ee_pose",

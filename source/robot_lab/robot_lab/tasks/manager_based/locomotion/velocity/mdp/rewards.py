@@ -838,6 +838,35 @@ def support_left_right_y_symmetry_penalty(env: ManagerBasedRLEnv) -> torch.Tenso
     return y_symmetry * support_mask.float()
 
 
+def support_foot_xy_range_penalty(
+    env: ManagerBasedRLEnv,
+    x_abs_min: float,
+    x_abs_max: float | None,
+    y_abs_min: float,
+    y_abs_max: float | None,
+    contact_force_threshold: float = 1.0,
+) -> torch.Tensor:
+    """Penalty on supporting foot centers outside a body-frame abs-x/abs-y range."""
+    asset_cfg = _get_go2arm_default_foot_asset_cfg(env)
+    foot_positions_b = _get_go2arm_foot_centers_b(env, asset_cfg)
+    abs_x = torch.abs(foot_positions_b[..., 0])
+    abs_y = torch.abs(foot_positions_b[..., 1])
+
+    x_violation = torch.square(torch.clamp(float(x_abs_min) - abs_x, min=0.0))
+    y_violation = torch.square(torch.clamp(float(y_abs_min) - abs_y, min=0.0))
+    if x_abs_max is not None:
+        x_violation = x_violation + torch.square(torch.clamp(abs_x - float(x_abs_max), min=0.0))
+    if y_abs_max is not None:
+        y_violation = y_violation + torch.square(torch.clamp(abs_y - float(y_abs_max), min=0.0))
+
+    in_contact = _get_go2arm_foot_contact_mask(env, contact_force_threshold=contact_force_threshold)
+    violation = (x_violation + y_violation) * in_contact.float()
+    contact_count = torch.clamp(in_contact.float().sum(dim=1), min=1.0)
+    penalty = torch.sum(violation, dim=1) / contact_count
+    no_contact = ~torch.any(in_contact, dim=1)
+    return torch.where(no_contact, torch.zeros_like(penalty), penalty)
+
+
 def touchdown_left_right_x_symmetry_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Penalty on left-right touchdown x mismatch using the most recent touchdown cache per foot."""
     return _get_go2arm_touchdown_symmetry_components(env)["touchdown_left_right_x_symmetry"]
@@ -1493,6 +1522,13 @@ def _compute_go2arm_reward_terms(
     )
     support_left_right_x_symmetry = support_left_right_x_symmetry_penalty(env)
     support_left_right_y_symmetry = support_left_right_y_symmetry_penalty(env)
+    support_foot_xy_range = support_foot_xy_range_penalty(
+        env,
+        x_abs_min=params["mani_regularization_support_foot_xy_range_x_abs_min"],
+        x_abs_max=params["mani_regularization_support_foot_xy_range_x_abs_max"],
+        y_abs_min=params["mani_regularization_support_foot_xy_range_y_abs_min"],
+        y_abs_max=params["mani_regularization_support_foot_xy_range_y_abs_max"],
+    )
     mani_regularization_raw = (
         abs(params["mani_regularization_support_roll_weight"])
         * (support_roll / params["mani_regularization_support_roll_std"])
@@ -1518,6 +1554,8 @@ def _compute_go2arm_reward_terms(
         * (support_left_right_x_symmetry / params["mani_regularization_support_left_right_x_symmetry_std"])
         + abs(params["mani_regularization_support_left_right_y_symmetry_weight"])
         * (support_left_right_y_symmetry / params["mani_regularization_support_left_right_y_symmetry_std"])
+        + abs(params["mani_regularization_support_foot_xy_range_weight"])
+        * (support_foot_xy_range / params["mani_regularization_support_foot_xy_range_std"])
     )
     # 当前配置里这些 weight 都是负值，表示“惩罚越大，regularization 越小”。
     # 这里把线性组合后的 raw 值通过 exp 映射到 (0, 1]，从而让整个 manipulation
@@ -1561,6 +1599,9 @@ def _compute_go2arm_reward_terms(
     )
     support_left_right_y_symmetry_weighted = abs(params["mani_regularization_support_left_right_y_symmetry_weight"]) * (
         support_left_right_y_symmetry / params["mani_regularization_support_left_right_y_symmetry_std"]
+    )
+    support_foot_xy_range_weighted = abs(params["mani_regularization_support_foot_xy_range_weight"]) * (
+        support_foot_xy_range / params["mani_regularization_support_foot_xy_range_std"]
     )
 
     # -----------------------------
@@ -1804,6 +1845,7 @@ def _compute_go2arm_reward_terms(
         "joint_limit_safety_penalty": joint_limit_safety_weighted,
         "support_left_right_x_symmetry_penalty": support_left_right_x_symmetry_weighted,
         "support_left_right_y_symmetry_penalty": support_left_right_y_symmetry_weighted,
+        "support_foot_xy_range_penalty": support_foot_xy_range_weighted,
         "mani_regularization_raw": mani_regularization_raw,
         "mani_regularization": mani_regularization,
         "ee_tracking_potential": ee_tracking_potential_weighted,
@@ -1897,6 +1939,12 @@ def total_reward(
     mani_regularization_support_left_right_x_symmetry_std: object = None,
     mani_regularization_support_left_right_y_symmetry_weight: object = None,
     mani_regularization_support_left_right_y_symmetry_std: object = None,
+    mani_regularization_support_foot_xy_range_weight: object = None,
+    mani_regularization_support_foot_xy_range_std: object = None,
+    mani_regularization_support_foot_xy_range_x_abs_min: object = None,
+    mani_regularization_support_foot_xy_range_x_abs_max: object = None,
+    mani_regularization_support_foot_xy_range_y_abs_min: object = None,
+    mani_regularization_support_foot_xy_range_y_abs_max: object = None,
     mani_potential_command_name: object = None,
     mani_potential_std: object = None,
     mani_potential_weight: object = None,
@@ -2035,6 +2083,12 @@ def total_reward(
         mani_regularization_support_left_right_x_symmetry_std,
         mani_regularization_support_left_right_y_symmetry_weight,
         mani_regularization_support_left_right_y_symmetry_std,
+        mani_regularization_support_foot_xy_range_weight,
+        mani_regularization_support_foot_xy_range_std,
+        mani_regularization_support_foot_xy_range_x_abs_min,
+        mani_regularization_support_foot_xy_range_x_abs_max,
+        mani_regularization_support_foot_xy_range_y_abs_min,
+        mani_regularization_support_foot_xy_range_y_abs_max,
         mani_potential_command_name,
         mani_potential_std,
         mani_potential_weight,
