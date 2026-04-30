@@ -17,6 +17,9 @@ from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.a
     EmpiricalNormalization,
     HiddenState,
 )
+from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.legacy_actor_critic import (
+    SplitLegArmActor,
+)
 
 
 class PrivilegedEncoderMLPModel(MLPModel):
@@ -44,12 +47,22 @@ class PrivilegedEncoderMLPModel(MLPModel):
         activation: str = "elu",
         obs_normalization: bool = False,
         distribution_cfg: dict | None = None,
+        stochastic: bool | None = None,
+        init_noise_std: float = 1.0,
+        noise_std_type: str = "scalar",
+        state_dependent_std: bool = False,
         proprio_group_names: tuple[str, ...] | list[str] = ("policy",),
         privileged_group_names: tuple[str, ...] | list[str] = ("privileged",),
         extra_group_names: tuple[str, ...] | list[str] = (),
         privileged_encoder_hidden_dims: tuple[int, ...] | list[int] = (128, 64),
         privileged_feature_dim: int = 32,
+        actor_shared_hidden_dims: tuple[int, ...] | list[int] | None = None,
+        actor_leg_head_hidden_dims: tuple[int, ...] | list[int] | None = None,
+        actor_arm_head_hidden_dims: tuple[int, ...] | list[int] | None = None,
+        leg_action_dim: int = 12,
+        **kwargs,
     ) -> None:
+        del kwargs
         # 不走父类默认初始化，因为这里的 latent 构造逻辑与普通 MLPModel 不同。
         nn.Module.__init__(self)
 
@@ -92,6 +105,15 @@ class PrivilegedEncoderMLPModel(MLPModel):
 
         # 分布头配置与普通 MLPModel 保持一致。
         self.distribution_cfg = copy.deepcopy(distribution_cfg)
+        if distribution_cfg is None and stochastic:
+            distribution_cfg = {
+                "class_name": "HeteroscedasticGaussianDistribution"
+                if state_dependent_std
+                else "GaussianDistribution",
+                "init_std": init_noise_std,
+                "std_type": noise_std_type,
+            }
+
         if distribution_cfg is not None:
             distribution_cfg = copy.deepcopy(distribution_cfg)
             dist_class: type[Distribution] = resolve_callable(distribution_cfg.pop("class_name"))  # type: ignore
@@ -102,7 +124,24 @@ class PrivilegedEncoderMLPModel(MLPModel):
             mlp_output_dim = output_dim
 
         # 创建最终 actor / critic 主干。
-        self.mlp = MLP(self.latent_dim, mlp_output_dim, hidden_dims, activation)
+        if obs_set == "actor" and isinstance(mlp_output_dim, int) and 0 < leg_action_dim < int(mlp_output_dim):
+            if actor_shared_hidden_dims is None:
+                actor_shared_hidden_dims = hidden_dims[:-1] if len(hidden_dims) > 1 else hidden_dims
+            if actor_leg_head_hidden_dims is None:
+                actor_leg_head_hidden_dims = hidden_dims[-1:] if len(hidden_dims) > 1 else ()
+            if actor_arm_head_hidden_dims is None:
+                actor_arm_head_hidden_dims = actor_leg_head_hidden_dims
+            self.mlp = SplitLegArmActor(
+                self.latent_dim,
+                int(mlp_output_dim),
+                shared_hidden_dims=actor_shared_hidden_dims,
+                leg_head_hidden_dims=actor_leg_head_hidden_dims,
+                arm_head_hidden_dims=actor_arm_head_hidden_dims,
+                activation=activation,
+                leg_action_dim=leg_action_dim,
+            )
+        else:
+            self.mlp = MLP(self.latent_dim, mlp_output_dim, hidden_dims, activation)
 
         # 如果有分布头，则沿用 rsl_rl 默认的分布头初始化方式。
         if self.distribution is not None:

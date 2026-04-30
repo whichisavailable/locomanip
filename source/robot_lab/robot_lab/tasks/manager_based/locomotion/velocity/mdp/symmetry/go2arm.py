@@ -8,7 +8,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from tensordict import TensorDict
+
+try:
+    from tensordict import TensorDict
+except ImportError:
+    TensorDict = object
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -46,6 +50,8 @@ def compute_symmetric_states(
     env: ManagerBasedRLEnv,
     obs: TensorDict | None = None,
     actions: torch.Tensor | None = None,
+    obs_type: str | None = None,
+    is_critic: bool | None = None,
 ):
     """Augment observations and actions with a global world-XZ mirror.
 
@@ -55,12 +61,20 @@ def compute_symmetric_states(
     """
     del env
 
-    obs_aug = _augment_observations(obs) if obs is not None else None
+    obs_aug = _augment_observations(obs, obs_type=obs_type, is_critic=is_critic) if obs is not None else None
     actions_aug = _augment_actions(actions) if actions is not None else None
     return obs_aug, actions_aug
 
 
-def _augment_observations(obs: TensorDict) -> TensorDict:
+def _augment_observations(
+    obs: TensorDict | torch.Tensor,
+    *,
+    obs_type: str | None = None,
+    is_critic: bool | None = None,
+) -> TensorDict | torch.Tensor:
+    if isinstance(obs, torch.Tensor):
+        return _augment_flat_observations(obs, obs_type=obs_type, is_critic=is_critic)
+
     batch_size = obs.batch_size[0]
     obs_aug = obs.repeat(2)
 
@@ -77,6 +91,35 @@ def _augment_observations(obs: TensorDict) -> TensorDict:
         obs_aug["critic_extra"][batch_size:] = obs["critic_extra"]
 
     return obs_aug
+
+
+def _augment_flat_observations(
+    obs: torch.Tensor,
+    *,
+    obs_type: str | None = None,
+    is_critic: bool | None = None,
+) -> torch.Tensor:
+    batch_size = obs.shape[0]
+    obs_aug = torch.empty(batch_size * 2, obs.shape[1], device=obs.device, dtype=obs.dtype)
+    obs_aug[:batch_size] = obs
+
+    if obs_type is None:
+        obs_type = "critic" if is_critic else "policy"
+
+    if obs.shape[1] == 92:
+        obs_aug[batch_size:] = _transform_policy_obs(obs)
+        return obs_aug
+
+    if obs.shape[1] in (148, 149):
+        mirrored = obs.clone()
+        mirrored[:, 0:92] = _transform_policy_obs(obs[:, 0:92])
+        mirrored[:, 92:148] = _transform_privileged_obs(obs[:, 92:148])
+        if obs_type == "critic" and obs.shape[1] > 148:
+            mirrored[:, 148:] = obs[:, 148:]
+        obs_aug[batch_size:] = mirrored
+        return obs_aug
+
+    raise ValueError(f"Unsupported Go2Arm flat observation shape for symmetry: {tuple(obs.shape)}.")
 
 
 def _augment_actions(actions: torch.Tensor) -> torch.Tensor:

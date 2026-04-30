@@ -198,7 +198,7 @@ def go2arm_reaching_stages(
         current_reset_root_x_range = tuple(float(v) for v in reset_root_x_range_stage1)
         current_reset_root_y_range = tuple(float(v) for v in reset_root_y_range_stage1)
         current_reset_root_yaw_range = tuple(float(v) for v in reset_root_yaw_range_stage1)
-        current_gating_fixed_d = 1.0
+        current_gating_fixed_d = None
         current_height_termination_progress = 0.0
         stage_value = stage_progress
     elif current_iteration < stage1_end_iteration:

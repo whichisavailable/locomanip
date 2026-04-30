@@ -16,6 +16,80 @@ from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.a
 )
 
 
+def _activation_module(activation: str) -> nn.Module:
+    activation = activation.lower()
+    if activation == "elu":
+        return nn.ELU()
+    if activation == "selu":
+        return nn.SELU()
+    if activation == "relu":
+        return nn.ReLU()
+    if activation == "crelu":
+        return nn.ReLU()
+    if activation == "lrelu":
+        return nn.LeakyReLU()
+    if activation == "tanh":
+        return nn.Tanh()
+    if activation == "sigmoid":
+        return nn.Sigmoid()
+    if activation == "identity":
+        return nn.Identity()
+    raise ValueError(f"Invalid activation function '{activation}'.")
+
+
+def _feature_mlp(input_dim: int, hidden_dims: Sequence[int], activation: str) -> nn.Module:
+    if len(hidden_dims) == 0:
+        return nn.Identity()
+
+    layers: list[nn.Module] = []
+    prev_dim = input_dim
+    for hidden_dim in hidden_dims:
+        layers.append(nn.Linear(prev_dim, hidden_dim))
+        layers.append(_activation_module(activation))
+        prev_dim = hidden_dim
+    return nn.Sequential(*layers)
+
+
+def _head_mlp(input_dim: int, output_dim: int, hidden_dims: Sequence[int], activation: str) -> nn.Module:
+    layers: list[nn.Module] = []
+    prev_dim = input_dim
+    for hidden_dim in hidden_dims:
+        layers.append(nn.Linear(prev_dim, hidden_dim))
+        layers.append(_activation_module(activation))
+        prev_dim = hidden_dim
+    layers.append(nn.Linear(prev_dim, output_dim))
+    return nn.Sequential(*layers)
+
+
+class SplitLegArmActor(nn.Module):
+    """Actor with a shared post-fusion encoder and separate leg/arm action heads."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        num_actions: int,
+        shared_hidden_dims: Sequence[int],
+        leg_head_hidden_dims: Sequence[int],
+        arm_head_hidden_dims: Sequence[int],
+        activation: str,
+        leg_action_dim: int = 12,
+    ) -> None:
+        super().__init__()
+        if not 0 < leg_action_dim < num_actions:
+            raise ValueError(f"leg_action_dim must be in (0, {num_actions}), got {leg_action_dim}.")
+
+        self.leg_action_dim = leg_action_dim
+        self.arm_action_dim = num_actions - leg_action_dim
+        self.shared_encoder = _feature_mlp(input_dim, shared_hidden_dims, activation)
+        shared_output_dim = shared_hidden_dims[-1] if len(shared_hidden_dims) > 0 else input_dim
+        self.leg_head = _head_mlp(shared_output_dim, self.leg_action_dim, leg_head_hidden_dims, activation)
+        self.arm_head = _head_mlp(shared_output_dim, self.arm_action_dim, arm_head_hidden_dims, activation)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        latent = self.shared_encoder(obs)
+        return torch.cat([self.leg_head(latent), self.arm_head(latent)], dim=-1)
+
+
 class PrivilegedTeacherActorCritic(nn.Module):
     """Legacy rsl_rl 3.x actor-critic with a privileged encoder for Go2Arm."""
 
@@ -39,6 +113,10 @@ class PrivilegedTeacherActorCritic(nn.Module):
         critic_obs_normalization: bool = False,
         privileged_encoder_hidden_dims: list[int] | None = None,
         privileged_feature_dim: int = 32,
+        actor_shared_hidden_dims: list[int] | None = None,
+        actor_leg_head_hidden_dims: list[int] | None = None,
+        actor_arm_head_hidden_dims: list[int] | None = None,
+        leg_action_dim: int = 12,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -93,11 +171,21 @@ class PrivilegedTeacherActorCritic(nn.Module):
             activation,
         )
 
-        self.actor = MLP(
+        if actor_shared_hidden_dims is None:
+            actor_shared_hidden_dims = actor_hidden_dims[:-1] if len(actor_hidden_dims) > 1 else actor_hidden_dims
+        if actor_leg_head_hidden_dims is None:
+            actor_leg_head_hidden_dims = actor_hidden_dims[-1:] if len(actor_hidden_dims) > 1 else []
+        if actor_arm_head_hidden_dims is None:
+            actor_arm_head_hidden_dims = actor_leg_head_hidden_dims
+
+        self.actor = SplitLegArmActor(
             self.POLICY_OBS_DIM + privileged_feature_dim,
             num_actions,
-            actor_hidden_dims,
-            activation,
+            shared_hidden_dims=actor_shared_hidden_dims,
+            leg_head_hidden_dims=actor_leg_head_hidden_dims,
+            arm_head_hidden_dims=actor_arm_head_hidden_dims,
+            activation=activation,
+            leg_action_dim=leg_action_dim,
         )
         self.critic = MLP(
             self.POLICY_OBS_DIM + privileged_feature_dim + self.CRITIC_EXTRA_OBS_DIM,

@@ -945,6 +945,8 @@ class RewardsCfg:
             # basic 奖励按加权求和。
             # 存活奖励权重。
             "basic_is_alive_weight": 0.0,
+            "basic_termination_penalty_weight": 0.0,
+            "basic_termination_penalty_excluded_terms": ("task_success",),
             # 碰撞惩罚总权重。
             "basic_collision_weight": 0.0,
             # 碰撞噪声过滤阈值。

@@ -11,9 +11,23 @@ from isaaclab_rl.rsl_rl import (
 )
 
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.rough_env_cfg import (
+    GO2ARM_LOCO_STAGE_END_ITERATION,
     UnitreeGo2ArmRoughEnvCfg,
 )
 from robot_lab.tasks.manager_based.locomotion.velocity.mdp.symmetry import go2arm
+
+
+GO2ARM_LOCO_STAGE_ACTION_MASK = (True,) * 12 + (False,) * 6
+
+
+@configclass
+class Go2ArmMaskedPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    class_name: str = (
+        '__import__("robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.'
+        'masked_ppo", fromlist=["MaskedActionPPO"]).MaskedActionPPO'
+    )
+    action_mask: tuple[bool, ...] | list[bool] | None = GO2ARM_LOCO_STAGE_ACTION_MASK
+    action_mask_until_iteration: int | None = GO2ARM_LOCO_STAGE_END_ITERATION
 
 
 def _resolve_init_noise_std(*, allow_vector: bool) -> float | tuple[float, ...]:
@@ -49,7 +63,7 @@ class UnitreeGo2ArmRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         activation="elu",
     )
 
-    algorithm = RslRlPpoAlgorithmCfg(
+    algorithm = Go2ArmMaskedPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
@@ -76,8 +90,9 @@ class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     go2arm_mani_phase_reset_arm_std = 0.4
     go2arm_mani_phase_reset_learning_rate = 3.0e-4
 
-    # isaaclab_rl 0.4.x still supports remapping observation groups even though the policy
-    # must be configured through the legacy single ActorCritic entry point.
+    # Older IsaacLab/RSL-RL versions only construct a single legacy policy object.
+    # The custom policy below still implements the new Go2Arm teacher semantics:
+    # privileged encoding plus separate leg and arm actor heads.
     obs_groups = {
         "actor": ["policy", "privileged"],
         "critic": ["policy", "privileged", "critic_extra"],
@@ -92,12 +107,14 @@ class UnitreeGo2ArmTeacherRoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         init_noise_std=_resolve_init_noise_std(allow_vector=True),
         actor_obs_normalization=True,
         critic_obs_normalization=True,
+        # PrivilegedTeacherActorCritic interprets this as:
+        # shared post-fusion encoder [512, 256], then separate leg/arm heads [128].
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
     )
 
-    algorithm = RslRlPpoAlgorithmCfg(
+    algorithm = Go2ArmMaskedPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
@@ -125,7 +142,7 @@ class UnitreeGo2ArmFlatPPORunnerCfg(UnitreeGo2ArmTeacherRoughPPORunnerCfg):
 class UnitreeGo2ArmFlatPPORunnerWithSymmetryCfg(UnitreeGo2ArmFlatPPORunnerCfg):
     """Flat Go2Arm PPO config with world-XZ mirror data augmentation."""
 
-    algorithm = RslRlPpoAlgorithmCfg(
+    algorithm = Go2ArmMaskedPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,

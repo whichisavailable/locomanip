@@ -308,7 +308,7 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         self.rewards.total_reward.params["gating_mu"] = 0.65
         self.rewards.total_reward.params["gating_l"] = 0.45
-        self.rewards.total_reward.params["gating_fixed_d"] = 1.0
+        self.rewards.total_reward.params["gating_fixed_d"] = None
         self.rewards.total_reward.params["mani_potential_weight"] = 50.0
         # 当前主要问题已经不是生存，而是 reaching 不够积极，因此把跟踪奖励做得更稠密一些。
         self.rewards.total_reward.params["mani_position_std"] = 0.35
@@ -435,11 +435,13 @@ class UnitreeGo2ArmRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.total_reward.params["loco_regularization_feet_contact_soft_trot_contact_force_threshold"] = 2.0
         self.rewards.total_reward.params["loco_tracking_std"] = 0.5
         self.rewards.total_reward.params["loco_tracking_threshold"] = 0.05
-        self.rewards.total_reward.params["loco_tracking_weight"] = 5.0
+        self.rewards.total_reward.params["loco_tracking_weight"] = 3.0
         self.rewards.total_reward.params["loco_arm_swing_weight"] = 0.15
         # 静态姿态约束之外，再补一个较轻的 arm 动态抑制，优先压制 locomotion 阶段肘关节快速上下摆动。
         self.rewards.total_reward.params["loco_arm_dynamic_weight"] = 0.01
         self.rewards.total_reward.params["basic_is_alive_weight"] = 0.2
+        self.rewards.total_reward.params["basic_termination_penalty_weight"] = -2.0
+        self.rewards.total_reward.params["basic_termination_penalty_excluded_terms"] = ("task_success",)
         self.rewards.total_reward.params["basic_collision_weight"] = -5.0
         self.rewards.total_reward.params["basic_collision_threshold"] = 1.0
         self.rewards.total_reward.params["basic_collision_count_weight"] = 1.0

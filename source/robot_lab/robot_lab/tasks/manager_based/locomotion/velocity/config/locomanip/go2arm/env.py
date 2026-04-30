@@ -115,6 +115,7 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         "loco_regularization_base_raw",
         "loco_regularization",
         "basic_is_alive",
+        "basic_termination_penalty",
         "basic_collision_penalty",
         "basic_action_smoothness_first",
         "basic_action_smoothness_second",

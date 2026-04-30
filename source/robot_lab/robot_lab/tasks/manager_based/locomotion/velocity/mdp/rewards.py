@@ -1459,6 +1459,27 @@ def basic_reward(
     return reward
 
 
+def non_success_termination_penalty(
+    env: ManagerBasedRLEnv,
+    excluded_terms: Sequence[str] | str = ("task_success",),
+) -> torch.Tensor:
+    """Return 1 for non-timeout terminations except explicitly excluded terms."""
+    if isinstance(excluded_terms, str):
+        excluded_terms = (excluded_terms,)
+    excluded_term_set = set(excluded_terms)
+
+    terminated = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    for term_name in env.termination_manager.active_terms:
+        if term_name in excluded_term_set:
+            continue
+        term_cfg = env.termination_manager.get_term_cfg(term_name)
+        if term_cfg.time_out:
+            continue
+        terminated |= env.termination_manager.get_term(term_name)
+
+    return terminated.float()
+
+
 def _compute_go2arm_reward_terms(
     env: ManagerBasedRLEnv,
     total_reward_term_name: str = "total_reward",
@@ -1803,6 +1824,10 @@ def _compute_go2arm_reward_terms(
         force_weight=params["basic_collision_force_weight"],
         force_scale=params["basic_collision_force_scale"],
     )
+    basic_termination_penalty = non_success_termination_penalty(
+        env,
+        excluded_terms=params.get("basic_termination_penalty_excluded_terms", ("task_success",)),
+    )
     basic_action_smoothness_first = action_smoothness_first_penalty(env)
     basic_action_smoothness_second = action_smoothness_second_penalty(env)
     basic_joint_torque_sq = joint_torque_sq_penalty(
@@ -1817,6 +1842,9 @@ def _compute_go2arm_reward_terms(
     )
     basic_is_alive_weighted = params["basic_is_alive_weight"] * basic_is_alive
     basic_collision_weighted = params["basic_collision_weight"] * basic_collision
+    basic_termination_penalty_weighted = (
+        params.get("basic_termination_penalty_weight", 0.0) * basic_termination_penalty
+    )
     basic_action_smoothness_first_weighted = (
         params["basic_action_smoothness_first_weight"] * basic_action_smoothness_first
     )
@@ -1828,6 +1856,7 @@ def _compute_go2arm_reward_terms(
     basic_total = (
         basic_is_alive_weighted
         + basic_collision_weighted
+        + basic_termination_penalty_weighted
         + basic_action_smoothness_first_weighted
         + basic_action_smoothness_second_weighted
         + basic_joint_torque_sq_weighted
@@ -1897,6 +1926,7 @@ def _compute_go2arm_reward_terms(
         "basic_joint_torque_sq_penalty": basic_joint_torque_sq_weighted,
         "basic_joint_power_penalty": basic_joint_power_weighted,
         "basic_reward": basic_total,
+        "basic_termination_penalty": basic_termination_penalty_weighted,
         "total_reward_debug": total,
     }
 
@@ -2040,6 +2070,8 @@ def total_reward(
     basic_collision_count_weight: object = None,
     basic_collision_force_weight: object = None,
     basic_collision_force_scale: object = None,
+    basic_termination_penalty_weight: object = None,
+    basic_termination_penalty_excluded_terms: object = None,
     basic_action_smoothness_first_weight: object = None,
     basic_action_smoothness_second_weight: object = None,
     basic_joint_torque_sq_weight: object = None,
@@ -2184,6 +2216,8 @@ def total_reward(
         basic_collision_count_weight,
         basic_collision_force_weight,
         basic_collision_force_scale,
+        basic_termination_penalty_weight,
+        basic_termination_penalty_excluded_terms,
         basic_action_smoothness_first_weight,
         basic_action_smoothness_second_weight,
         basic_joint_torque_sq_weight,
