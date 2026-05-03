@@ -4,9 +4,11 @@
 
 ## Go2Arm Task
 
-`go2arm` 是一个四足机器人背载机械臂的 loco-manipulation 任务。简单说，就是让机器人一边走，一边把机械臂的末端保持在目标位姿附近。
+`go2arm` 是一个四足机器人背载机械臂的 loco-manipulation 任务，目标是在移动过程中完成末端位姿跟踪。
 
-我最开始想做的是蒸馏训练，让学生策略去学教师策略；但目前这套方法连教师策略都还不能稳定把任务做好。所以这份 README 先把重点放在 `flat` 任务的说明、训练和 `play` 上，`rough` 版本只作为补充保留。
+当前工作主要复现文章 *Learning Whole-Body Loco-Manipulation for Omni-Directional Task Space Pose Tracking with a Wheeled-Quadrupedal-Manipulator* (RAL)。原文面向轮足机器人，主要贡献集中在三类 reward shaping 设计。本项目沿用其奖励形式，并将任务迁移到四足版本。
+
+目前观察到的结果是：在未显式加入机身命令的情况下，再叠加四足机器人的步态约束，训练效果不理想，教师策略也尚未稳定收敛。因此，这份 README 先以 `flat` 任务为主，`rough` 版本仅作为补充保留。
 
 ### Robot Setup
 
@@ -104,13 +106,4 @@ Go2Arm 的 `play` 脚本还支持两个常用调试参数：
 
 ## Citation
 
-This repository is a modified version of `robot_lab`. If you use this version, please cite this repository instead of the upstream original.
-
-```text
-@software{fan-ziqi2026robot_lab_go2arm,
-  author = {Ziqi Fan},
-  title = {robot_lab Go2Arm fork},
-  url = {<replace-with-this-repository-url>},
-  year = {2026}
-}
-```
+This repository is a modified version of `robot_lab`.
