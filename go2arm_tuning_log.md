@@ -1,1167 +1,1143 @@
 # Go2Arm 调整日志
 
-本文档用于持续记录 `go2arm` 任务在复现论文过程中的问题、分析、修改和结果。目标不是只记“改了什么”，而是把每次调整背后的判断依据、失败路径和后续影响也保留下来，方便后续回看、对比和复盘。
-
-## 使用原则
-
-- 一次实验周期尽量对应一条日志，不要把多个互相无关的问题混在一起。
-- 优先记录“为什么改”，其次才是“改了什么”。
-- 如果一个结论只是猜测，要明确写成“假设”，不要写成“事实”。
-- 尽量写清楚观察证据，例如日志指标、视频现象、奖励分解、终止原因统计、关键超参数和 commit / 文件位置。
-- 如果一次修改失败，也保留记录。失败结论同样有价值。
-
-## 推荐记录格式
-
-每次新增记录时，可以复制下面这个模板。
-
-```md
-## [日期 / 阶段名] 标题
-
-### 1. 背景
-- 当前复现目标：
-- 对齐的论文设定 / 代码版本：
-- 对应任务 / 环境：
-
-### 2. 现象
-- 训练中观察到的现象：
-- play / 可视化中的具体现象：
-- 日志中最异常的指标：
-- 是否可稳定复现：
-
-### 3. 初步判断
-- 怀疑的问题模块：
-- 为什么怀疑这里：
-- 备选解释：
-
-### 4. 排查过程
-- 看了哪些文件：
-- 对照了哪些 reward / observation / command / curriculum / event：
-- 做了哪些最小化验证：
-- 排除了什么：
-
-### 5. 修改内容
-- 修改的文件：
-- 修改前：
-- 修改后：
-- 修改目的：
-
-### 6. 实验设置
-- task：
-- seed：
-- num_envs：
-- 训练步数 / iteration：
-- 是否 headless：
-- 其他关键参数：
-
-### 7. 结果
-- 修改后现象：
-- 指标是否改善：
-- 是否引入新问题：
-- 与修改前相比的主要差异：
-
-### 8. 结论
-- 这次修改是否有效：
-- 有效的原因判断：
-- 仍未解决的问题：
-
-### 9. 下一步
-- 下一个最值得验证的问题：
-- 建议优先改动的位置：
-```
-
-## 调整日志大纲
-
-下面是建议长期维护的目录结构。随着内容增多，可以把每个一级问题逐步展开。
-
-## 1. 复现目标与基线
-
-### 1.1 目标论文与要复现的核心能力
-- 论文名称
-- 希望复现的具体能力
-- 当前代码与论文的主要差异
-
-### 1.2 当前实验基线
-- 使用的环境
-- 机器人资产版本
-- 训练脚本 / 配置入口
-- 当前默认 reward / observation / command / curriculum 版本
-
-### 1.3 判定成功的标准
-- 定性标准
-- 定量标准
-- 训练稳定性标准
-
-## 2. 主要问题总览
-
-### 2.1 当前最突出的失败模式
-- 例如：只会走不会够
-- 例如：只顾 reaching 导致姿态崩溃
-- 例如：出现非足端支撑作弊
-- 例如：soft trot 学不稳
-
-### 2.2 问题优先级排序
-- 哪些问题最影响训练主线
-- 哪些问题只是表现不美观但不阻塞训练
-
-## 3. 按模块记录调整
-
-### 3.1 动作设计调整
-- 动作空间语义是否正确
-- default-centered delta 是否合适
-- 机械臂早期冻结策略是否有效
-- joint clip 是否过紧或过松
-
-### 3.2 观测设计调整
-- policy 观测是否足够
-- privileged 信息是否泄露过多 / 过少
-- 是否存在观测延迟、量纲不一致、噪声问题
-- 哪些观测对训练最敏感
-
-### 3.3 命令设计调整
-- `ee_pose` 采样范围是否合理
-- base-frame / world-z 混合采样是否有效
-- reject cuboid 是否需要调整
-- 目标姿态范围是否超出机械臂有效工作空间
-
-### 3.4 奖励设计调整
-- manipulation 分支的问题
-- locomotion 分支的问题
-- basic 项是否过强或过弱
-- gating 机制是否按预期切换
-- 哪些 reward 项在主导训练
-
-### 3.5 Curriculum 调整
-- stage 切换是否过快 / 过慢
-- low-z / high-z 混合采样是否破坏稳定性
-- reset 扰动是否引入过早难度
-- termination 阈值是否跟 curriculum 协调
-
-### 3.6 Event / 随机化调整
-- 外力扰动是否过强
-- 质量扰动是否影响主结论
-- push 频率是否合理
-- 是否需要逐步补充 domain randomization
-
-### 3.7 接触与终止条件调整
-- 非足端接触判断是否过严 / 过松
-- 足端 contact 是否准确
-- base height / orientation termination 是否提前截断学习
-- success termination 是否过难触发
-
-### 3.8 训练超参数调整
-- PPO 超参数
-- 学习率 / 熵系数 / clip 范围
-- 并行环境数
-- seed 稳定性
-- teacher / symmetry / mask 相关策略
-
-## 4. 失败案例库
-
-### 4.1 明确无效的修改
-- 改了什么
-- 为什么无效
-- 应避免再次重复尝试的原因
-
-### 4.2 有副作用的修改
-- 局部提升了什么
-- 同时恶化了什么
-- 适用边界是什么
-
-## 5. 阶段性结论
-
-### 5.1 当前最可信的判断
-- 目前最可能的主瓶颈
-- 当前最有效的改动
-
-### 5.2 尚未验证的关键假设
-- 还没有足够证据支持的判断
-- 需要怎样的实验来验证
-
-### 5.3 下一阶段计划
-- 短期优先事项
-- 中期优化方向
-- 是否需要回到论文重新对齐设定
-
-## 6. 附录
-
-### 6.1 常用对照信息
-- 关键文件路径
-- 常用训练命令
-- 常用 play / debug 命令
-
-### 6.2 结果索引
-- 不同实验日志位置
-- 视频 / 截图位置
-- 关键 checkpoint 说明
-
-## 版本化调整记录（首批 3 段）
-
-下面先把日志改成按“版本演进”记录，而不是按日期平铺。日期仍然可以作为辅助信息保留，但主索引改为版本号。
-
-建议约定如下：
-
-- `1.0`：第一个“能训练起来”的可用版本
-- `1.0 -> 1.1`：小修，通常是兼容性修复、bug 修复、参数微调
-- `1.1 -> 2.0`：大改，通常是 reward 结构、课程结构、命令语义、模型结构等层面的修改
-
-首批先整理 3 个版本节点，从“开始能够训练”附近起步。
+本文档用于记录 `go2arm` 任务在实现过程中的问题、分析、修改和结果，方便后续对比和复盘。
 
 ## Version 1.0
 
-### 阶段定义
-- 这是最早一批“先把 `go2arm` 任务在另一台 Ubuntu 机器上跑起来”的工作。
-- 时间大致对应 `4.14` 前后。
+### 状态
 
-### 来源对话
-- 线程 A：`019d8ae6-cd68-77d2-be53-d141d2dcc6f7`
-- 线程 B：`019d8c38-2a4a-76f3-b3fb-9e74f1efb8bc`
+- `go2arm` 首次能够正常进入训练流程。
+- 这一版的目标不是训练效果正确，而是让训练入口、配置入口、`play` 入口和旧版 Isaac Lab / `rsl_rl` 接口至少能接通。
 
-### 这一版本面对的主要问题
-- 直接复制仓库到另一台 Ubuntu 机器后，`RobotLab-Isaac-Flat-Go2Arm-v0` 环境不存在。
-- 新机器环境缺少依赖，例如 `pxr`。
-- `go2arm` 在旧版 Isaac Sim 4.5 / Isaac Lab 对应版本上触发接口兼容问题：
-  - `ObservationsCfg` 未定义
-  - `total_reward` 的参数签名与本地 IsaacLab 版本不一致
-  - `EmpiricalNormalization` 等 `rsl_rl` 模块接口不一致
+### 主要问题（表现）
 
-### 当时形成的关键约束
-- 不允许修改 `IsaacLab` 本体，只能适配 `robot_lab`。
-- 不允许为了“把报错消掉”而随意改训练逻辑。
-- 适配重点应是：
-  - 环境注册路径
-  - 旧接口兼容层
-  - `rsl_rl` / `IsaacLab` 版本差异桥接
+- `RobotLab-Isaac-Flat-Go2Arm-v0` 环境无法正常注册。
+- 缺少依赖，例如 `pxr`。
+- `go2arm` 在旧版 Isaac Sim / Isaac Lab 接口下存在兼容性问题：
+  - `ObservationsCfg` 未定义。
+  - `total_reward` 参数签名不一致。
+  - `rsl_rl` 相关接口不一致。
+- 必须先区分问题来自环境、reward、observation，还是 policy 入口。
 
-### 这一版本的意义
-- `Version 1.0` 不是一个“训练效果好”的版本，而是第一个“任务能在目标机器和目标老接口上正常进入训练流程”的基线版本。
-- 后续所有 reward、课程、课程学习失效等讨论，都建立在这个可运行版本之上。
+### 解决思路（原因分析）
+
+- 先建立可运行基线，再谈 reward、command 和 curriculum 的效果。
+- 尽量只修改 `robot_lab` ，不修改 `IsaacLab` 本体，避免把干净内容污染。
+
+### 具体改动
+
+- 适配环境注册、旧接口兼容层和 `rsl_rl / IsaacLab` 版本桥接。
+- 核对训练入口、回放入口和配置入口是否使用同一套任务语义。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/*`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/*`
+  - `scripts/reinforcement_learning/rsl_rl/play.py`
 
 ## Version 1.0 -> 1.1
 
-### 阶段定义
-- 训练已经能正常运行，但推理 / `play` 流程仍然不稳定。
-- 时间大致对应 `4.15` 前半段。
+### 状态
 
-### 来源对话
-- 线程：`019d8f95-98b0-7640-ac15-bcca15809a06`
+- 在训练和 `play` 基本能跑之后，第一次进入 reward 结构层面的真实修改。
+- 这一版主要处理 `mani regularization` 的总形式，让它从负向惩罚转向可解释的正向调制项。
 
-### 这一小版本面对的主要问题
-- 用户明确反馈：`go2arm` 训练已经可以正常运行，但执行 `play` 时出错。
-- 用户非常在意一点：修复 `play` 不能反过来改变训练逻辑，也不能借修 bug 的名义去改模型语义。
+### 主要问题（表现）
 
-### 这段对话里反复强调的原则
-- 只做 bug 修复，不做训练逻辑重构。
-- 不允许“为了兼容推理就顺手改训练代码行为”。
-- 若某个补丁看起来已经改变了逻辑，就应该回退。
+- 原来的 `mani regularization` 更像一组负权重惩罚，与原文所表现的效果相悖。
+- 日志里看到 reward 数值变化时，无法判断是在反映任务进步，还是只是在反映稳定性。
+- 某个 reward 项在总奖励里到底是加法项、门控项还是正则项，语义不够清楚。
 
-### 这一小版本的核心定位
-- `1.0 -> 1.1` 代表的是“从只能训练，到训练和 play 两条链路都开始被认真区分”的阶段。
-- 这一步对后续很重要，因为它明确建立了一个复现原则：
-  - 兼容性修复可以做
-  - 训练逻辑变更必须单独记账，不能混在兼容性补丁里
+### 解决思路（原因分析）
 
-### 这一版本对后续记录的意义
-- 从这一阶段开始，日志就不应该只写“报错修掉了”，还要写清楚：
-  - 这是兼容性修复
-  - 还是行为逻辑修改
-- 后面所有 reward、curriculum 和 command 的改动，都应与这类兼容性修复分开编号。
+- 先把 `mani regularization` 的总语义从“罚多少”改成“质量有多好”。
+- 让它可以和 manipulation 主 reward 并列解释，并能被门控稳定使用。
+
+### 具体改动
+
+- 将 `mani regularization` 从负惩罚改为正向质量分数。
+- 原典型负权重包括：
+  - `support_roll = -0.1`
+  - `support_feet_slide = -0.05`
+  - `support_foot_air = -0.05`
+  - `support_non_foot_contact = -0.10`
+  - `posture_deviation = -0.02`
+  - `joint_limit_safety = -0.05`
+- 总形式从线性负惩罚转向 `0~1` 正则分数。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 1.1 -> 1.2
 
-### 阶段定义
-- 在训练 / play 都基本可用之后，开始进入第一批“真正影响任务行为”的设计修改。
-- 时间大致对应 `4.15` 后半段。
+### 状态
 
-### 来源对话
-- 线程：`019d9128-3a83-7090-bddb-b50aec835319`
+- `mani regularization` 已经改成正向调制项，但子项仍存在量纲不一致问题。
+- 这一版把重点从“总形式”下沉到“每个子项先归一化”。
 
-### 这一小版本面对的主要问题
-- 用户开始集中讨论 manipulation regularization 的表达形式。
-- 原先这一部分主要表现为惩罚项，加权后整体更像是一个负值或负向扣分。
-- 用户希望把最终 regularization 改成一个 `0~1` 范围的调制项，而不是简单线性扣罚。
+### 主要问题（表现）
 
-### 当时明确提出的设计思路
-- 不能只改总和的输出形式，子项也要一起调整，否则尺度关系会失真。
-- 更自然的做法是：
-  - 先把各个子项尺度归一化
-  - 将它们全部转成非负量
-  - 再对加权和做指数映射
-- 用户已经明确指出：如果只在最后一层加个 `exp`，但子项尺度和权重不重新梳理，数值关系会失真
+- 某些子项因为原始数值范围大，容易主导总和。
+- weight 同时承担“重要性”和“补偿量纲”的作用，导致后续调参不好解释。
 
-### 这一小版本的重要性
-- 这是从“兼容性修复阶段”进入“任务目标函数重塑阶段”的第一个明显版本。
-- 它不是大改到 `2.0` 的程度，但已经不再是单纯 bug fix，而是开始改变 reward 的结构表达方式。
+### 解决思路（原因分析）
 
-### 这一版本对后续演进的意义
-- 从 `1.1 -> 1.2` 开始，日志里应该逐步形成这样的记录方式：
-  - 这是兼容性修复，还是行为设计修改
-  - 如果是 reward 修改，它改变的是“加法项”“乘法门控项”还是“指数 regularization”
-  - 子项尺度是否重新定义
+- 每个子项先本地归一化，再统一汇总。
+- weight 只表达重要性，不再表达量纲补偿。
 
-## 当前对首个可训练版本的理解
+### 具体改动
 
-基于现有本地聊天日志，较合理的起点是：
-
-- `Version 1.0`：约 `4.14` 前后，核心目标是让 `go2arm` 在 Ubuntu + Isaac Sim 4.5 / Isaac Lab 对应老接口上能够正常开始训练
-- `Version 1.1`：训练能跑后，修复 `play` 路径上的兼容性问题，但强调不改变训练逻辑
-- `Version 1.2`：开始第一次真正的 reward 结构设计修改，即把 manipulation regularization 从负向惩罚项重构为 `0~1` 调制项
-
-## 后续建议
-
-接下来继续补版本时，建议优先按下面的顺序往后记：
-
-- `1.2 -> 2.0`：第一次较大的 reward / curriculum 结构调整
-- `2.0 -> 2.1`：课程参数或命令采样的小修
-- `2.1 -> 3.0`：当任务语义发生明显变化时，例如从“站立 reach”转向“显式 loco+reach”
+- 引入子项归一化和裁剪：
+  - `support_roll` 除以 `0.15^2`
+  - `support_feet_slide` 除以 `0.1`
+  - `support_foot_air` 裁到 `0~2`
+  - `support_non_foot_contact` 的力幅值尺度改到 `30`
+  - 总 penalty 裁到 `0~4`
+  - `posture_deviation` 除以 `sqrt(6) * 0.4`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
 
 ## Version 1.2 -> 1.3
 
-### 阶段定义
-- 这一阶段开始第一次系统地对照训练日志，而不是只盯着代码结构。
-- 核心目标是判断“训练虽然在跑，但为什么行为没有真正学起来”。
+### 状态
 
-### 来源对话
-- 线程：`019d94f3-4992-7350-abf7-9f2c25e4406a`
+- reward 结构调整后，开始检查具体 reward 参数是否真的接入总奖励。
+- 这一版主要修正 `support_non_foot_contact` 的实现链路。
 
-### 这一小版本面对的主要问题
-- 用户已经可以训练并导出模型，开始需要：
-  - 比较不同训练结果对应的模型
-  - 用 `play` 加载不同 checkpoint
-  - 用 TensorBoard 打开日志
-- 更关键的是，用户开始明确反馈训练异常：
-  - 训练 `7000` 轮后仍然“落地就死”
-  - 命令采样已经固定到单点
-  - reward 也重调过
-  - 日志中 `value_function loss ≈ 0`
+### 主要问题（表现）
 
-### 当时形成的关键判断
-- 这是第一次把“训练现象”和“日志量”绑定起来看，而不是只凭肉眼看 `play`。
-- 用户已经怀疑 critic 是否没训起来，这使得后续排查开始围绕：
-  - `gate_d`
-  - `tracking_error`
-  - `episode_length`
-  - critic / actor 的训练状态
-  展开。
+- 配置层已经有 `support_non_foot_contact` 相关参数，但需要确认它们是否真的被 `total_reward` 使用。
+- 训练虽然在跑，但行为没有真正学起来，单看总 reward 已经不足以定位问题。
 
-### 这一小版本的意义
-- `1.2 -> 1.3` 代表从“开始改 reward 结构”进一步过渡到“开始用训练日志驱动分析”。
-- 从这个版本开始，后续调整就不应只写“改了什么”，还要写“日志证据是什么”。
+### 解决思路（原因分析）
 
-## Version 1.3 -> 2.0
+- 先排除“配置里改了，实际总奖励没用上”的假调参。
+- 后续日志诊断必须建立在 reward 参数真实生效的前提上。
 
-### 阶段定义
-- 这是第一轮比较明确的“大改”，核心不是继续微调 reward，而是重新定义 stage1 的几何基准。
-- 关键动作是：先固定 reset，再通过日志拿到真实初始位姿，然后据此设计命令采样空间。
+### 具体改动
 
-### 来源对话
-- 线程：`019d9690-6c0c-7601-b18e-0dc657d0e62d`
+- 修正 `support_non_foot_contact_penalty` 的参数链路。
+- 确认以下参数进入 `total_reward`：
+  - `count_weight`
+  - `force_weight`
+  - `force_scale`
+- 当时相关配置包括：
+  - `count_weight = 1.0`
+  - `force_weight = 0.5` 或 `1.0`
+  - `force_scale = 10.0`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/cus_velocity_env_cfg.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
-### 这一版本面对的主要问题
-- 用户不再接受“凭感觉估计 stage1 命令空间”。
-- 用户要求：
-  - 先把 reset 固定到初始位置
-  - 把初始位姿通过训练日志打出来
-  - 删除无关或重复的日志项
-  - 根据真实初始末端位姿来设计 `stage1` 的 command 采样空间和姿态 reset 范围
-  - 并明确要求：课程暂时仍然固定在 `stage1`
+## Version 1.3 -> 1.4
 
-### 这一版本里出现的关键信息
-- 日志里已经开始直接输出：
-  - `initial_ee_pos_b_x/y/z`
-  - `initial_ee_euler_b_roll/pitch/yaw`
-- 用户给出的一个关键初始位姿样例是：
-  - `initial_ee_pos_b ≈ (0.1693, -0.0004, 0.4913)`
-  - `initial_ee_euler_b ≈ (-0.0120, 1.4732, -0.0141)`
+### 状态
 
-### 这一版本形成的关键方法论
-- `stage1` 的近端采样空间不应该手写拍脑袋，而应围绕“真实 reset 初始位姿”设计。
-- 这意味着课程设计第一次从“抽象概念阶段”进入“真实几何基准阶段”。
-- 也是从这里开始，后续关于：
-  - `stage1` 到底算不算近端
-  - 目标姿态范围是否合理
-  - reset 扰动是否破坏了几何先验
-  的讨论才有了真实参照系。
+- `mani` 相关 reward 已经可运行，但累计 tracking error 的阶段语义不清。
+- 这一版调整 `mani cumulative error` 的门控。
 
-### 为什么这是 `2.0`
-- 这一步改变的不是单个 reward 项，而是课程设计的根基：命令空间的参考系和 stage1 的定义依据。
-- 因此更适合作为第一次真正的“大版本”。
+### 主要问题（表现）
+
+- `cumulative tracking error` 更像固定权重项。
+- 当前是 `loco` 还是 `mani` 阶段时，这个项的参与强度耦合不清。
+
+### 解决思路（原因分析）
+
+- 如果累计误差在 locomotion 主导阶段过强介入，会把命令误差和步态稳定阶段混在一起。
+- 它应只在 manipulation 更相关的阶段明显生效。
+
+### 具体改动
+
+- 将 `mani cumulative error` 改为跟随 manipulation 门控，与 `1 - D` 绑定，不再始终固定强度参与。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - 与 `ee_pose` 命令缓存相关的实现
+
+## Version 1.4 -> 1.5
+
+### 状态
+
+- `mani` 主 tracking 项仍然过敏。
+- 这一版重设 position / orientation tracking 的尺度。
+
+### 主要问题（表现）
+
+- 早期配置中：
+  - `mani_position_std = sqrt(0.0004) = 0.02`
+  - `mani_orientation_std = sqrt(0.01) = 0.1`
+- `std` 太小导致 tracking 曲线过陡，误差稍大就迅速失去可解释性。
+
+### 解决思路（原因分析）
+
+- 放缓 `r_pos` 和 `r_ori` 的敏感度。
+- 让 tracking 曲线能更稳定地表达误差变化，而不是过早饱和。
+
+### 具体改动
+
+- 将位置和姿态 tracking 的归一化尺度统一到 `0.25`。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+## Version 1.5 -> 1.6
+
+### 状态
+
+- `basic reward` 开始被拆成可解释子项。
+- 这一版是 basic 项权重和尺度的首轮体系化整理。
+
+### 主要问题（表现）
+
+- 不能只看总 reward 是否增长。
+- 需要追问 basic 项是不是把策略稳定在错误行为上。
+
+### 解决思路（原因分析）
+
+- 把 basic 的各个子项单独解释，明确 alive、collision、action smoothness、joint torque / velocity 的作用。
+- 先建立一个可对照的基础参数组。
+
+### 具体改动
+
+- 首轮整理 `basic reward` 关键参数：
+  - `alive = 2`
+  - `collision = -5`
+  - `collision threshold = 1`
+  - `collision force_scale = 20`
+  - `action smoothness 1 = -0.003`
+  - `action smoothness 2 = -0.001`
+  - `joint velocity weight = 0.001`
+  - `joint torque weight = 0.001`
+  - `joint torque std = 40`
+  - `joint velocity std = 4`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+## Version 1.6 -> 1.7
+
+### 状态
+
+- basic 项中暴露出关节力矩量级异常。
+- 这一版重写 torque / power 相关项。
+
+### 主要问题（表现）
+
+- 训练输出中观察到 `basic` 里的关节力矩项数值能到 `5800`。
+- 原写法接近“平方和直接进 reward”，量级容易失控。
+- 同时还保留了单独 `joint_velocity` 惩罚和依赖 `std` 的形式。
+
+### 解决思路（原因分析）
+
+- 将“力矩大”和“功率大”拆开解释。
+- 避免一个量级异常的项混在 basic 里主导判断。
+
+### 具体改动
+
+- 重写关节力矩 / 功率项：
+  - 去掉独立 `joint_velocity` 惩罚。
+  - 不再使用 `std` 式或指数式表达。
+  - 改成 `sum of squared torques` 和 `norm(torque * velocity)`。
+- 移除相应 `std` 参数，并按新语义重命名。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+
+## Version 1.7 -> 1.8
+
+### 状态
+
+- reward 分解开始依赖日志，但训练输出过杂。
+- 这一版清理训练日志输出项。
+
+### 主要问题（表现）
+
+- 日志里混有目标位姿明细、`gating_mu / gating_l` 等与当前定位关系不大的项。
+- “日志很多，但看不到真正想看的 reward 分解”。
+
+### 解决思路（原因分析）
+
+- 训练输出应优先服务 reward 诊断。
+- 命令和门控内部参数不应把核心 reward 分解淹没。
+
+### 具体改动
+
+- 清理训练输出：
+  - 保留各 reward 项日志。
+  - 删除目标位姿明细、`gating_mu / gating_l` 等与当前定位关系不大的输出。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/cus_velocity_env_cfg.py`
+
+## Version 1.8 -> 2.0
+
+### 状态
+
+- 从 reward 局部修补转向课程几何基准重做。
+- 这一大版本开始重新核对 reset、`play` 初始姿态和课程工作空间是否一致。
+
+### 主要问题（表现）
+
+- `stage1` 命令空间此前主要凭经验估计，没有真实初始末端位姿作为参照。
+- `reward` 和日志虽然更可解释，但仍然存在“reward 在涨，行为不一定真的更对”的问题。
+
+### 解决思路（原因分析）
+
+- 如果 `stage1` 的命令基准本身不是从真实初始姿态出发，继续调 reward 容易掩盖问题。
+- 需要把 `play` 里看到的起始姿态、训练时实际 reset 的姿态、课程中的近端工作空间放到同一套几何参考下。
+
+### 具体改动
+
+- 将课程、命令、奖励和 `play` 观察拉到同一个参照系里。
+- `stage1` 命令空间开始依赖真实初始末端位姿，而不是经验估计。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/*`
+  - `scripts/reinforcement_learning/rsl_rl/play.py`
 
 ## Version 2.0 -> 2.1
 
-### 阶段定义
-- 在 reset / 初始位姿被明确化之后，开始出现一个新问题：指标看起来没坏，但训练在一段时间后进入平台期。
+### 状态
 
-### 来源对话
-- 线程仍然主要来自：`019d9690-6c0c-7601-b18e-0dc657d0e62d`
+- `stage1` 几何基准明确后，继续把 reset、初始末端位姿和命令空间固定下来。
+- 这一版是 `stage1` 几何基准的具体落地。
 
-### 这一小版本面对的主要问题
-- 用户比较第 `208` 轮和第 `515` 轮日志后发现：
-  - `tracking_error` 基本不下降
-  - `episode_length` 很长，说明环境没死
-  - `mani_reward` 和 `basic_reward` 看起来都正常
-  - 但跟踪误差进入平台期
+### 主要问题（表现）
 
-### 这一步的实际含义
-- 这标志着问题从“能不能稳定训练”变成了“为什么 reward 在涨，但目标能力没变强”。
-- 也就是第一次比较明确地暴露出：
-  - reward shaping 与真实任务进步之间可能脱节
-  - stage1 可能过于容易，或者在错误方向上形成局部最优
+- `tracking_error` 不明显下降。
+- `episode_length` 很长，环境并未频繁终止。
+- `mani_reward` 和 `basic_reward` 看起来正常，但目标能力没有明显提升。
 
-### 对后续版本的意义
-- 后续关于 curriculum、gating 和近端任务语义的所有问题，都可以视作对这个平台期问题的延伸回答。
+### 解决思路（原因分析）
+
+- 这说明 reward shaping 和真实任务进步之间可能脱节。
+- 也可能意味着 `stage1` 太容易，或者策略在错误方向上形成局部最优。
+- 先固定 `stage1`，避免课程多因素同时变化。
+
+### 具体改动
+
+- 固定 reset。
+- 记录真实初始末端 `ee` 位置和姿态。
+- 用真实初始位姿重新设计 `stage1 command` 和 reset 扰动范围。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/*`
 
 ## Version 2.1 -> 3.0
 
-### 阶段定义
-- 这是第二轮很明确的大改：把“calf 近似足端接触”升级为“精确足端接触语义”。
-- 这一步直接影响 reward、observation、合法/非法接触判断和训练策略本身。
+### 状态
 
-### 来源对话
-- 线程 A：`019d9d88-7abb-7bf3-a626-c80a5f4a31ed`
-- 线程 B：`019da0b7-b041-7830-ba7a-5c148a0d6ec1`
+- 第二次明显大改，核心从课程/几何问题切换到接触语义。
+- `3.0` 成为后续步态、非法接触和 termination 分析的统一接触基线。
 
-### 这一版本面对的主要问题
-- 当前使用的是从 URDF 转出的 USD。
-- 在 Isaac Sim 4.5 下，这个 USD 的足端不是刚体，因此不能直接用 IsaacLab 标准 `ContactSensorCfg` 读取真实 foot force。
-- 于是旧实现只能用 `calf + offset` 近似足端接触。
-- 用户已经明确观察到：这种近似会把策略带向“趴着前进”之类的错误行为。
+### 主要问题（表现）
 
-### 用户明确给出的任务语义
-- 合法接触只允许四个足端触地。
-- `calf` 上的力应视为非法接触。
-- 如果观测里也有近似接触力或近似足端量，也要一起核查并统一语义。
+- 原始实现中，由于 Isaac Sim 版本和 USD 转换限制，足端不是刚体，无法直接挂载接触传感器。
+- 足端接触依赖 `calf + offset` 近似实现。
+- 这种近似会把策略引向错误行为，例如爬行式前移、贴地拖行、膝关节触地。
+- 日志、`play` 和实际行为的接触定义持续对不上。
 
-### 这一版本的关键转折
-- 这不是简单的“读数接口替换”，而是接触语义的重定义。
-- 它同时牵涉：
-  - reward 中合法 / 非法接触的判断
-  - 足端法向力
-  - 足端接触力观测
-  - 是否继续沿用 `calf+offset` 的速度 / 高度近似
-- 用户还指出一个更底层的问题：
-  - 之前尝试用 IsaacSim 底层接口读精确足端力时，可能受 `_isaacsim` 与真实 IsaacSim 启动配置不一致影响，导致扩展没正常载入
+### 解决思路（原因分析）
 
-### 为什么这是 `3.0`
-- 这一步影响的是任务“接触真值”的定义，不只是参数。
-- 一旦从 `calf` 近似切换到真实足端，很多原来的 reward / termination / observation 语义都会改变。
-- 因此这属于典型的大版本。
+- 合法接触应收敛到明确的四足足端语义。
+- `calf` 受力不应默认为可接受支撑，而应作为非法接触处理。
+- reward、termination、observation 和 contact 诊断必须围绕同一套接触定义。
+
+### 具体改动
+
+- 改为明确使用 URDF，且不合并关节。
+- 合法支撑从 `calf + offset` 近似收缩为四个足端。
+- `calf` 不再被默认视为合法支撑。
+- 重写接触相关 reward、termination 和诊断项的语义。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
+  - 接触 sensor 配置相关文件
 
 ## Version 3.0 -> 3.1
 
-### 阶段定义
-- 精确足端接触体系逐步接上之后，开始补足日志、随机化和终止语义的一致性。
+### 状态
 
-### 来源对话
-- 线程：`019daaa1-3794-7b83-92f6-f50906289a17`
+- 接触语义接上之后，先修日志、终止和随机化语义的一致性。
+- 这一版不是大重构，而是为后续对比实验补基础诊断。
 
-### 这一小版本关注的内容
-- mani / loco / basic 的奖励子项输出顺序和完整性
-- `task_success` 是否真正触发终止，以及判定条件
-- 机身期望高度调到 `0.4`
-- mani 正则项中的 `roll` 与“足端不触地”权重做小幅上调
-- 外力随机化的语义：
-  - base 和末端执行器外力是否启用
-  - reset 时加的外力是瞬时还是整个 episode 持续
-  - 是否应改成和 `go2` 任务一致的施力形式，但保留既定数值
+### 主要问题（表现）
 
-### 这一版本的意义
-- `3.0 -> 3.1` 代表开始从“把接触语义接对”走向“让日志、终止和扰动语义也对齐”。
-- 这一步虽然不是重构级别的大改，但对后续稳定比较实验结果非常重要。
+- `play`、训练日志和 reward 分解仍可能使用不同版本的指标。
+- `task_success` 是否真正触发 termination 需要确认。
+- 外力随机化和机身期望高度的语义需要整理。
 
-## 细粒度版本补充
+### 解决思路（原因分析）
 
-下面这一段继续把此前容易被“大节点”吞掉的小修改补出来。这里不追求把每一次敲回车都记成一个版本，而是把真正改变了分析结论、调参方向或配置接口的小步调整补齐。
+- 先让日志、回放和 reward 分解对齐，再做更细的 reward 调参。
+- 避免不同地方看到的是不同版本的训练指标。
+
+### 具体改动
+
+- 重新整理 `mani / loco / basic` 的日志输出。
+- 检查 `task_success` 是否真正触发终止。
+- 调整机身期望高度。
+- 小幅调整部分 `mani regularization` 权重。
+- 梳理外力随机化的真实语义。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 3.1 -> 3.2
 
-### 阶段定义
-- 这一段主要对应第一次高频 reward 微调链。
-- 核心主题不是重做结构，而是在“不动 loco 主体结构”的前提下，排查为什么 tracking 驱动力不够。
+### 状态
 
-### 来源对话
-- 线程：`019d9a64-81e1-7fe0-b96e-aac2c1beb158`
+- 第一次高频 `loco reward` 微调。
+- 这一版重点判断哪些门控或压缩在压制 locomotion 行为。
 
-### 这一小版本里补上的关键小修改
-- 明确追问 `loco` 里 `trot` 权重为什么做 `0.3` 次方，开始意识到步态门控本身也可能在弱化 locomotion 目标。
-- 在“不修改 loco reward 结构”的约束下，优先把 tracking 的 `exp` 项加权系数提到配置层，便于直接在 `rough` 中调。
-- 讨论 `is_alive` 是否过强，是否把策略先推向“站稳保命”而不是“主动跟踪”。
-- 开始怀疑动作 `clip` 过紧，可能出现“想动但是出不去动作幅度”的情况。
-- 进行了小步试探：
-  - 腿部动作 `clip` 提大到 `0.4`
-  - 存活奖励降到 `0.5`
-  - `trot` 的 `0.3` 次方先改回 `1`
+### 主要问题（表现）
 
-### 这一段暴露出的判断
-- 这里的重点已经不再是“Reward 数值对不对”，而是“哪一个门控在压制真正想学的行为”。
-- 用户此时已经非常明确地区分了两类改动：
-  - 结构级改动：尽量先不碰
-  - 权重级和幅度级改动：先快速试探
+- `tracking` 驱动力不足。
+- `loco` 中 `trot` 权重存在 `0.3` 次方压缩。
+- 动作幅度可能被 clip 限制过紧。
+
+### 解决思路（原因分析）
+
+- 先不改 `loco reward` 主结构，优先调权重和动作幅度。
+- 把“reward 数值看起来大”和“真正主导策略更新”区分开。
+
+### 具体改动
+
+- 将 tracking 的 `exp` 项加权系数提到配置层。
+- 腿部 `action clip` 提到 `0.4`。
+- `is_alive` 降到 `0.5`。
+- `trot` 的 `0.3` 次方压缩改回 `1.0`。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 3.2 -> 3.3
 
-### 阶段定义
-- 这一段主要围绕调试日志本身展开。
-- 目标是把 locomotion 相关信号改成更直观、能指导判断的形式，而不是继续堆更多标量。
+### 状态
 
-### 来源对话
-- 线程：`019d9a64-81e1-7fe0-b96e-aac2c1beb158`
+- 调试重点转到日志可解释性。
+- 这一版先让 `trot`、`support_factor` 和 regularization 的关系能被看清。
 
-### 这一小版本里补上的关键小修改
-- 调试阶段临时不输出 `mani` 相关奖励，避免日志噪声过大。
-- 重新要求输出更直观的 `soft trot` 指标，不只是最后一层乘完后的结果，而是尽量靠近“门控值”和“支撑稳定性修正后”的语义。
-- 明确区分：
+### 主要问题（表现）
+
+- 日志难以分清显示的是原始值、加权值，还是经过门控后的值。
+- `trot`、`support_factor` 和 regularization 之间的关系不直观。
+
+### 解决思路（原因分析）
+
+- 日志应成为 reward 可解释性工具，而不只是结果面板。
+- 调试阶段先减少无关输出，明确每个 reward 项的层级。
+
+### 具体改动
+
+- 调试阶段先不输出 `mani` 奖励。
+- 将 `soft trot` 输出改成更接近真实语义的形式。
+- 区分：
   - `loco_regu_base_raw`
   - `loco_regu`
   - `trot`
-  三者各自是什么，以及它们在组合上的关系。
-- 要求日志里展示“不包含 `support_factor` 影响”的版本，避免把步态项和支撑项混成一个黑箱。
-- 移除不再需要的 `feet_contact_soft_trot_gate` 之类中间项，避免缓存了但不记录，形成无效资源消耗。
-
-### 这一段的意义
-- 从这里开始，日志不只是“结果面板”，而是被当成 reward 可解释性工具使用。
-- 后面很多关于 `support_factor`、`trot` 平均条件、near/far 分类的修改，都是从这一步的日志语义整理延伸出来的。
+- 输出不含 `support_factor` 的版本。
+- 清理不再需要的中间缓存项。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 3.3 -> 3.4
 
-### 阶段定义
-- 这一段是“先调 locomotion 驱动力，再检查 command 是否在误导策略”的小步试错链。
+### 状态
 
-### 来源对话
-- 线程：`019d9a64-81e1-7fe0-b96e-aac2c1beb158`
+- 在不大改命令语义的前提下，局部验证 `loco` 是否被命令分布误导。
+- 这一版强调最小改动面。
 
-### 这一小版本里补上的关键小修改
-- 讨论过是否直接关掉动作限制、把命令姿态固定到默认值、把 `x` 命令拉远，用来验证 loco 是否真的能走起来。
-- 用户随后要求回退这种过强的实验性命令改法，不要把 `stage2/3` 一起改掉，只在 `stage1` 上做最小化调整。
-- 明确把“姿态误差在总 tracking 误差中的权重”写入 `rough` 配置，而不是只在代码里临时加常数。
-- 在保持原始命令设计的前提下，尝试：
-  - 让 `stage1` 的 `x` 整体向前平移
-  - 把姿态朝向那一部分的影响暂时压小，减少 loco 为了追姿态发生偏航或下伏
+### 主要问题（表现）
 
-### 这一段的判断变化
-- 用户在这里已经很明确地拒绝“为了验证某个猜测而把命令分布改得面目全非”。
-- 从此之后，“最小化修改面”变成一个持续约束：优先改接口、权重、阶段局部，不轻易改整套语义。
+- 需要区分 `loco` 学不会到底来自 reward 还是 command。
+- 有些配置只是“看起来能动”，但不代表命令语义真的合理。
+
+### 解决思路（原因分析）
+
+- 用局部试验验证 command 分布，但避免让实验性改法污染主线。
+- 通过 `play` 现象和日志共同判断命令语义是否合理。
+
+### 具体改动
+
+- 试探关闭动作限制、固定姿态命令、拉远 `x` 命令。
+- 回退过强的实验性命令改法，只保留 `stage1` 局部修改。
+- 将姿态误差在总 tracking error 中的权重接入 `rough`。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 3.4 -> 3.5
 
-### 阶段定义
-- 这一段转向 locomotion regularization 的细调。
-- 目标是让姿态和步态更自然，而不是只追踪到目标点。
+### 状态
 
-### 来源对话
-- 线程：`019d9a64-81e1-7fe0-b96e-aac2c1beb158`
-- 线程：`019da4b3-8d4a-7180-b990-62c7d2ba7f2f`
+- 转向 locomotion regularization 的细调。
+- 目标从“能走”转向“走得自然”。
 
-### 这一小版本里补上的关键小修改
-- 下调一批会鼓励“压低机身换稳定”的正则项权重，保留 `base_roll_weight`，压低：
+### 主要问题（表现）
+
+- base 稳定项可能把策略锁死成僵硬解。
+- reward 问题从“要不要加这项”变成“这项会不会压过真正想学的行为”。
+
+### 解决思路（原因分析）
+
+- 降低过强的保守稳定约束。
+- 让“自然步态”和“自然构型”进入主体设计。
+
+### 具体改动
+
+- 下调一批偏“压稳定”的项：
   - `base_pitch_weight`
   - `base_pitch_ang_vel_weight`
   - `base_z_vel_weight`
   - `base_height_weight`
-- 把 `loco_tracking_std` 调到更密集的状态，例如 `0.5`，试图让近远目标都持续受到位置 tracking 驱动。
-- 把对称步态中的门控参数、`support_factor` 等接口进一步外提到 `rough`，方便快速试验。
-- 对机械臂动作幅度和 `mani` 默认构型偏离惩罚做更细的关节级区分：
-  - `joint2` 与其他关节的 `clip` 上限分开
-  - `joint2` 偏离默认构型惩罚加权更高
-  - `joint3` 惩罚适当减弱
-- 新增“腿关节偏离默认构型惩罚”，并按 `hip / thigh / calf` 分权重接入 `loco_regularization`。
-
-### 这一段的意义
-- 这里的调整标志着目标已经从“先跑起来”转向“跑得像不像样”。
-- 也就是从 `tracking` 主导的 debug，过渡到“自然步态”和“自然构型”约束开始进入主体设计。
+- 调小 `loco_tracking_std`。
+- 将 `support_factor` 等接口外提到 `rough`。
+- 对机械臂动作幅度和默认构型惩罚做关节级区分。
+- 在 `loco_regularization` 中加入腿关节偏离默认构型惩罚，并按 `hip / thigh / calf` 分权重。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 3.5 -> 3.6
 
-### 阶段定义
-- 这一段是对对称性、腿序、观测顺序和脚端几何约束的一次系统清点。
+### 状态
 
-### 来源对话
-- 线程：`019da4b3-8d4a-7180-b990-62c7d2ba7f2f`
+- 系统清点腿序、观测顺序、对称性和脚端几何约束。
+- 这一版主要清理“语义不一致”和“死接口”。
 
-### 这一小版本里补上的关键小修改
-- 检查 reset 后默认站姿是否真正左右对称。
-- 核对多个模块里的腿部顺序是否一致：
+### 主要问题（表现）
+
+- 需要确认底层顺序和语义没有错位。
+- `play` 动作维度、reward 腿索引、接触传感器身体顺序可能不一致。
+
+### 解决思路（原因分析）
+
+- 后续调参不能建立在错位索引上。
+- 先确认动作、关节、传感器和 reward 使用的是同一套顺序。
+
+### 具体改动
+
+- 检查 reset 后默认站姿是否对称。
+- 核对：
   - `joint` 名称顺序
   - action 输出维度到关节的映射
   - foot contact sensor 顺序
-  - `feet slide / air time / non-foot contact` 对应的腿索引
-- 清点当前是否真的启用了某些对称性或接触类约束，避免“以为开着其实没接上”。
-- 把 loco 中左右脚 `x` 距离不一致惩罚扩展为 `x+y`，去掉多余截断上限和遗留接口：
-  - 清理 `max_err`
-  - 清理 `diagonal_foot_symmetry_max_err`
-- 检查新增奖励项有没有真正进日志；对“只是取反，没有新增信息”的累积误差惩罚项取消记录。
-
-### 这一段的意义
-- 这一步不是在直接加新 reward，而是在清理“语义不一致”和“死接口”。
-- 这种清理对后续课程调参很关键，因为如果底层腿索引或日志语义混乱，课程学习表现会被误读。
+  - `feet slide / air time / non-foot contact` 的腿索引
+- 将左右脚 `x` 距离不一致惩罚扩展为 `x+y`。
+- 清理遗留的 `max_err` 和相关接口。
+- 检查新增奖励项是否真的进入日志。
 
 ## Version 3.6 -> 3.7
 
-### 阶段定义
-- 这一段主要是对随机化和训练配置边界做认知收束。
+### 状态
 
-### 来源对话
-- 线程：`019da4b3-8d4a-7180-b990-62c7d2ba7f2f`
-- 线程：`019dae84-2b41-79b3-b916-f985914ae12c`
+- 对随机化和训练配置边界做认知收束。
+- 这一版把“学不会能力”和“泛化增强”拆开。
 
-### 这一小版本里补上的关键小修改
-- 系统梳理当前有哪些 domain randomization，哪些真正启用了。
-- 单独澄清 `com` 随机化是什么、会改什么物理量。
-- 明确在时间紧张的条件下，优先顺序应是：
-  - 先把 curriculum 调顺
-  - 再加 domain randomization
-- 同时还牵涉到一些训练配置边界问题：
-  - 初始动作噪声是否被私自改过
-  - 是否支持向量化 `init_noise_std`
-  - 读取不到时不能悄悄回退到标量
+### 主要问题（表现）
 
-### 这一段的意义
-- 用户在这里已经开始把“能力学不会”和“泛化增强”两个阶段拆开。
-- 这也是后面把 curriculum 当成主线、把随机化延后处理的直接前提。
+- 需要明确当前到底有哪些 domain randomization，哪些是真启用。
+- 初始动作噪声和 `init_noise_std` 的影响还不清楚。
+
+### 解决思路（原因分析）
+
+- 优先级应是先调通 curriculum，再补随机化。
+- 避免把泛化增强误当成学习能力不足的主因。
+
+### 具体改动
+
+- 梳理 `domain randomization` 项。
+- 澄清 `com` 随机化含义。
+- 继续检查初始动作噪声和 `init_noise_std` 相关逻辑。
 
 ## Version 3.7 -> 4.0
 
-### 阶段定义
-- 这是下一次明确的大版本修改。
-- 核心不是 reward，而是第一次系统重做 `go2arm` 的课程学习语义。
+### 状态
 
-### 来源对话
-- 线程：`019db422-7aea-7003-8cd4-87c0c420e0bb`
+- 第三次明显大改，主题是重做课程学习语义。
+- curriculum 从经验式范围切换到几何和任务语义驱动。
 
-### 为什么这是一个大版本
-- 用户明确指出现有 `stage1 / stage2 / stage3` 数值很多只是“随手写的”，不能再拿它们当事实基线。
-- 课程设计从“凭经验写范围”转向“围绕 reset 默认姿态、机械臂工作空间、与机身距离和避撞风险来定义命令空间”。
-- 同时开始系统区分：
-  - 安全区
-  - 风险区
-  - 禁止区
-- 并要求课程按训练进度推进，不再只靠静态三段范围切换。
+### 主要问题（表现）
 
-### 这一大版本里形成的核心方案
-- 第一阶段先学近距离 `mani`，重点是站稳和摆出手臂姿态。
-- 第二阶段逐步增加需要 `pitch` 配合的高难 `z` 命令，并逐渐提高占比。
-- 第三阶段再扩大 `xy` 范围，让任务真正进入“走过去再操作”。
-- 近端采样必须显式考虑“距离机身太近会撞机身”的问题，而不能只看机械臂理论可达性。
+- 现有 `stage1 / stage2 / stage3` 数值并不可信，很多只是临时写入。
+- 接触语义统一后，主要矛盾转到课程本身是否在引导正确的任务序列。
+
+### 解决思路（原因分析）
+
+- 课程设计必须围绕 reset 默认姿态、机械臂工作空间、末端与机身距离和避撞风险来定义。
+- 先学近距离 `mani`，再逐步加入高难 `z`，最后扩大 `xy` 范围。
+
+### 具体改动
+
+- 重做三阶段课程：
+  - 第一阶段先学近距离 `mani`。
+  - 第二阶段逐步加入需要 `pitch` 配合的高难 `z` 命令。
+  - 第三阶段再扩大 `xy` 范围，进入“走过去再操作”。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 4.0 -> 4.1
 
-### 阶段定义
-- 在课程大框架确定之后，开始补关键几何细节和采样参考系。
+### 状态
 
-### 来源对话
-- 线程：`019db422-7aea-7003-8cd4-87c0c420e0bb`
+- 在课程主框架之上补几何细节和采样参考系。
+- 这一版继续把课程从“调范围”推进到“调几何语义”。
 
-### 这一小版本里补上的关键小修改
-- 用户明确要求高难 `z` 不只有“低 `z` 贴地”，还包括“高 `z` 需要机身上仰才能够到”的目标。
-- 低 `z` 任务需要覆盖地面物体，而不仅仅是悬空近端点。
-- 课程不应只采安全区和高难区两块离散区域，中间过渡区域也要有覆盖，避免命令空间断裂。
-- `z` 采样开始转向“更接近世界系直觉”的表示：
-  - `xy` 仍可在机身系中定义
-  - `z` 更适合按世界系高度来约束
-- 命令构造上逐渐形成“`xy` 基于 base-frame，`z` 基于 world-z，再统一转换”的思路。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步让课程从“分阶段调范围”进一步变成“分阶段调几何语义”。
-- 它直接影响之后低位抓取、抬头够高位、以及远端行走任务能否被统一描述。
+- 高难 `z` 不仅有低位，还有高位。
+- 低位任务需要覆盖地面物体。
+- 当前命令空间中还存在断裂和空白区域。
+
+### 解决思路（原因分析）
+
+- 高难 `z` 应拆成不同任务类别，而不是只用一个连续范围表示。
+- `xy` 和 `z` 对参考系的需求不同，需要开始拆开处理。
+
+### 具体改动
+
+- 将高难 `z` 明确定义为低位贴地和高位上仰两类。
+- 开始形成 `xy` 用 base-frame、`z` 用 world-z 的混合采样思路。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 4.1 -> 4.2
 
-### 阶段定义
-- 这一段主要是在“按 iteration 推课程，而不是按物理步数”上收敛具体方案。
+### 状态
 
-### 来源对话
-- 线程：`019db422-7aea-7003-8cd4-87c0c420e0bb`
+- 课程切换从粗略阶段标签收敛到 iteration 语义。
+- 这一版加细阶段内部调度。
 
-### 这一小版本里补上的关键小修改
-- 用户明确要求课程切换不要按总 step，而要按 iteration 理解和配置。
-- 早期方案里 `stage1` 时长被认为太长，用户希望：
-  - `stage1` 大约只占 `0-200` 轮
-  - `stage2` 拉长
-  - 大约 `3000` 轮左右进入 `stage3`
-- `stage2` 又被进一步拆成三个子过程：
-  - `200-700`：保持较低高难比例
-  - `700-1500`：逐步扩大 `z` 上下极限
-  - `1500-2500`：逐步增大高难任务比例
-- 用户额外强调：
-  - 不要等插值走到终点才开始学最难任务
-  - 要留出一段时间，让机器人在“整个最终范围”里真正适应
+### 主要问题（表现）
 
-### 这一段的意义
-- 从这里开始，课程不再是粗糙的三段开关，而是进入“阶段内部也有进度结构”的设计。
+- 按总 step 理解课程不直观，也不方便与实验迭代对应。
+- 原 `stage2` 过于粗糙。
+
+### 解决思路（原因分析）
+
+- 用 iteration 作为主要调度轴。
+- 阶段内部也应有渐进结构，而不是三段硬开关。
+
+### 具体改动
+
+- `stage1` 缩短。
+- `stage2` 拆成更细的几个子过程：
+  - 保持低比例高难命令。
+  - 扩大 `z` 上下极限。
+  - 增大高难命令比例。
+- 保留最终范围适应期，不等插值跑到终点才开始学最难部分。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
 
 ## Version 4.2 -> 4.3
 
-### 阶段定义
-- 这一段对应一次很关键的现实校准：本地代码版本与真实训练版本并不同步。
+### 状态
 
-### 来源对话
-- 线程：`019dbd26-455e-7521-8687-871f588636b9`
+- 现实校准阶段：本地代码版本与真实训练版本并不同步。
+- 这一版重点不是改 reward，而是明确实验记录口径。
 
-### 这一小版本里补上的关键判断
-- 用户先给出一个训练退化现象：
-  - `8192` 并行环境训练 `1000` 轮后，只会原地操作
-  - 高位任务较好，低位任务失败
-  - 远 `x` 目标走不起来
-- 随后又更正了一个极重要事实：
-  - 本地看到的版本并不是训练时真正用的版本
-  - 训练版本是 `8192 env + 500 轮开下一关`
-  - 本地版本是 `4096 env + 1000 轮开下一关`
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步直接说明问题不只是“课程设计得差”，还包括“训练配置和本地认知脱节”。
-- 也正因为这次校准，后续日志必须把：
+- 同样的代码理解对应不上真实训练结果。
+- 实际训练版本与本地版本在 `num_envs` 和课程切换 iteration 上不一致。
+
+### 解决思路（原因分析）
+
+- 之后的记录必须区分代码版本、训练环境规模和实际课程阈值。
+- 否则同一个结论可能对应不同训练条件。
+
+### 具体改动
+
+- 后续记录明确区分：
   - `num_envs`
-  - curriculum 切换 iteration
-  - 真正训练用的命令范围
-  分开明确记录。
+  - curriculum 阈值
+  - 实际训练命令范围
 
 ## Version 4.3 -> 4.4
 
-### 阶段定义
-- 这一段主要围绕异常行为分析：下伏、危险 `pitch`、近端不对称、远端跳跃而非 trot。
+### 状态
 
-### 来源对话
-- 线程：`019dbd26-455e-7521-8687-871f588636b9`
+- 异常行为分析阶段。
+- 后续 `pitch` 校准、终止阈值和 `support_factor` 重写都从这里展开。
 
-### 这一小版本里补上的关键判断
-- 用户观察到近距离目标下，机身习惯性下伏，而且 `pitch` 很接近一个固定危险值，头几乎触地。
-- 即便是高 `z` 任务，也出现先下伏再伸手，而不是通过合理机身姿态配合去够目标。
-- 远 `x` 任务不是“走过去”，而是“跳过去”：
-  - 足端落点对称
-  - 但没有相位
-  - 所有脚几乎一起触地
-- 这里开始明确区分两类问题：
-  - `pitch` 定义和理解是否一致
-  - `trot/support` 约束是否过粗，导致跳跃和不良支撑没有被细致地区分
+### 主要问题（表现）
 
-### 这一段的意义
-- 这是从“课程不好学”进一步转向“当前行为模式到底错在哪里”的分解点。
-- 后面 `pitch` 校准、终止阈值收紧、support factor 重写，都是从这里展开。
+- 近距离任务中机身下伏严重。
+- 高位任务也先下伏再伸手。
+- 远 `x` 任务更像跳过去，而不是走过去。
+- 出现 `fz = -2m`、`reward pitch = +0.55rad`、`gravity pitch = -0.55rad` 这类符号不一致现象。
+
+### 解决思路（原因分析）
+
+- 同时检查 `pitch` 定义是否一致，以及 `trot/support` 约束是否过粗。
+- 将“危险下伏”从模糊现象转成可量化约束。
+
+### 具体改动
+
+- 修正 `target_height_conditioned_pitch_penalty` 的语义。
+- 在 `play` 中直接输出 `pitch`。
+- 姿态终止阈值收紧为两层：
+  - 软阈值 `0.4`
+  - 硬阈值 `0.5`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
+  - `scripts/reinforcement_learning/rsl_rl/play.py`
 
 ## Version 4.4 -> 4.5
 
-### 阶段定义
-- 这一段是对 `pitch` 语义和危险姿态约束的一次明确修正。
+### 状态
 
-### 来源对话
-- 线程：`019dbd26-455e-7521-8687-871f588636b9`
+- `pitch` 校准后，继续细化 `trot` 支撑因子。
+- 这一版把支撑从单一开关改成分层偏好。
 
-### 这一小版本里补上的关键小修改
-- 先通过 `play` 输出 `pitch` 角度，确认不同地方的符号是否一致。
-- 用户实测发现：
-  - `fz` 表现为明显下压
-  - `reward pitch` 与 `gravity pitch` 的符号相反
-- 据此要求修正 `target_height_conditioned_pitch_penalty` 的语义。
-- 同时把终止阈值收紧成：
-  - 软阈值 `0.4`
-  - 硬阈值 `0.5`
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步把“危险下伏”从模糊现象转成了可量化约束。
-- 对后续判断“机器人是在合理俯身，还是在危险贴地”非常关键。
+- 不希望用硬惩罚一刀切地打掉跳跃。
+- 也不能把坏支撑和可接受支撑混成一类。
 
-## Version 4.5 -> 4.6
+### 解决思路（原因分析）
 
-### 阶段定义
-- 这一段继续细化 `trot` 的支撑因子，不再把所有非理想支撑一概而论。
+- 允许短暂四脚支撑，但仍让真正对角支撑更占优。
+- 将支撑模式分档，而不是二值化。
 
-### 来源对话
-- 线程：`019dbd26-455e-7521-8687-871f588636b9`
+### 具体改动
 
-### 这一小版本里补上的关键小修改
-- 用户不想“硬打掉跳跃”，而是希望以软约束的方式让真正的 `trot` 更占优。
-- 因此放弃过于粗暴的规则，例如四脚支撑直接大幅扣分。
-- 最终把 `support_factor` 调成更细的三档近似：
+- 将 `support_factor` 细化成三档：
   - `diag_double_factor = 1.0`
   - `all_four_factor = 0.9`
   - `bad_support_factor = 0.25`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
-### 这一段的意义
-- 这代表用户更偏向“保留可过渡的自然步态变化”，而不是一上来用硬惩罚把策略压进死板模式。
+## Version 4.5 -> 4.6
+
+### 状态
+
+- 讨论是否改成先学 `loco` 再学 `loco + mani`。
+- 这一版形成一个原则：不手动固定 gate 破坏原 soft switch。
+
+### 主要问题（表现）
+
+- 课程效果差，但直接固定 `gate=1` 会破坏论文里的门控机制。
+
+### 解决思路（原因分析）
+
+- 保留现有 soft switch 机制，优先调整命令分布和阶段范围。
+- 不用人为固定 gate 来绕过问题。
+
+### 具体改动
+
+- 保留现有三段结构。
+- 优先调整：
+  - 各阶段 `xyz` 范围
+  - `gate` 分布位置
+  - near / far 占比
 
 ## Version 4.6 -> 4.7
 
-### 阶段定义
-- 这一段是“课程是不是应该先学 loco，再学 loco+mani”的第一次最小改动讨论。
+### 状态
 
-### 来源对话
-- 线程：`019dbd68-7d95-7692-b44d-27aa28d294c6`
+- 补日志语义，让课程分析落到 near / far 任务类别上。
+- 这一版让 curriculum 诊断更直接。
 
-### 这一小版本里形成的关键判断
-- 用户不接受通过手动把 `gate` 固定成 `1` 的方式做“纯 loco 预训练”，因为这会破坏现有 `gate_d` 的原始作用。
-- 因此新的思路不是“关掉 mani”，而是尽量保留三段式结构，只调整：
-  - 各阶段的 `xyz` 采样范围
-  - `gate` 的分布位置，例如 `mu`
-  - near / far 命令在阶段中的占比
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步再次体现出一个持续原则：尽量保留当前系统的核心门控机制，只做最小、可解释的再设计。
+- `x_near` 的日志语义与实际课程观察不一致。
+- 只看总平均无法判断 near 和 far 的行为差异。
+
+### 解决思路（原因分析）
+
+- 课程问题必须落到具体命令类别上。
+- 日志应显式区分当前命令属于 near 还是 far。
+
+### 具体改动
+
+- 日志不再只输出模糊的 `x_near`。
+- 改为输出：
+  - 当前命令属于近端还是远端。
+  - 该类别下的存活时长。
+- 相关位置：
+  - 训练日志输出注册相关实现
 
 ## Version 4.7 -> 4.8
 
-### 阶段定义
-- 这一段主要补日志语义，让课程分析能直接落到 near / far 任务类别上。
+### 状态
 
-### 来源对话
-- 线程：`019dbd68-7d95-7692-b44d-27aa28d294c6`
+- 主线切向 `flat` 任务的终止异常。
+- 排查重点从“行为学不会”转向“termination 是否判错、放大错”。
 
-### 这一小版本里补上的关键小修改
-- 用户发现日志里 `x_near` 的语义与当前课程阶段看到的现象不一致，于是要求直接改日志定义。
-- 新要求不是简单输出“某个阈值以下的命令数量”，而是输出：
-  - 命令目标属于近端还是远端
-  - 这种类别下对应的存活时长
+### 主要问题（表现）
 
-### 这一段的意义
-- 从这里开始，日志不仅服务于 reward 调试，也被直接用于课程效果分析。
-- 后面如果继续补日志，最有价值的方向也是围绕“任务类别统计”和“阶段行为差异”展开，而不是单纯再堆更多标量。
+- `joint_torque_termination` 比例异常高。
+- 并行环境规模放大后问题显著恶化。
+- torque reward 惩罚没有明显变大，但 torque termination 明显变多。
+
+### 解决思路（原因分析）
+
+- 终止统计或连续违规判定逻辑本身可能有问题。
+- 不能只看 reward，必须追问 `Term/*` 指标分别代表什么。
+
+### 具体改动
+
+- 观察重点转向：
+  - `joint_torque_termination`
+  - `done_count`
+  - 持续违规终止逻辑
+- 开始结合训练日志和实际回放排查 termination。
+- 相关位置：
+  - `scripts/reinforcement_learning/rsl_rl/play.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
 
 ## Version 4.8 -> 4.9
 
-### 阶段定义
-- 这一段开始明显从 `rough curriculum` 主线切到 `flat` 任务的训练崩坏排查。
-- 核心问题是：为什么训练大量被 `joint_torque_termination` 杀掉，而且并行环境一放大就更严重。
+### 状态
 
-### 来源对话
-- 线程：`019dc5c6-1bac-7d43-8b85-114d9fe358a1`
-- 线程：`019dc5c8-3519-7332-8cbe-dc2af550f12a`
+- 显式质疑连续违规终止实现。
+- 终止逻辑基础设施本身被纳入排查范围。
 
-### 这一小版本里补上的关键判断
-- 用户先观察到 `flat go2arm` 训练中 `joint_torque_termination` 占比接近 `98%`，开始怀疑：
-  - PD 参数是否有问题
-  - reset 设计是否过激
-  - PPO 学习率是否不合适
-  - 课程学习是否把动作推到了危险区域
-- 接着进一步发现，这个问题和 `num_envs` 规模强相关：
-  - 之前 `4096 env` 时几乎不怎么 torque done
-  - 调到 `16384 env` 后，torque termination 占比急剧上升，最低也有 `70%+`
-- 用户同时指出一个反常现象：
-  - torque 相关 reward 惩罚并没有明显变大
-  - 但 torque termination 却大幅增加
-  - 因此怀疑 termination 统计本身的实现或连续违规判定逻辑有问题
+### 主要问题（表现）
 
-### 这一段的意义
-- 这标志着问题从“行为学不会”转向“终止机制本身可能统计错、判错、放大错”。
-- 也从这里开始，日志分析不再只看 reward，而开始系统对照：
-  - done_count
-  - terminated/time_out 比例
-  - 各 termination term 的触发比例
+- `_persistent_violation` 语义可疑。
+- 如果连续违规逻辑有问题，不止 torque termination 会出问题。
+
+### 解决思路（原因分析）
+
+- 需要先确认连续违规判定是否正确。
+- 其他连续终止也可能受同一问题影响。
+
+### 具体改动
+
+- 将 `_persistent_violation` 纳入重点排查。
+- 对照各类连续 termination 是否存在同类异常。
 
 ## Version 4.9 -> 5.0
 
-### 阶段定义
-- 这一段是对“连续违规终止”语义的一次显式质疑和修正方向确认。
+### 状态
 
-### 来源对话
-- 线程：`019dc5c6-1bac-7d43-8b85-114d9fe358a1`
-- 线程：`019dc5c8-3519-7332-8cbe-dc2af550f12a`
+- 收口 `play` 和训练日志的 debug 通道。
+- 后续判断开始直接依赖 `play` 和训练日志暴露出的 termination 原因。
 
-### 这一小版本里补上的关键小修改
-- 用户重点追问 `_persistent_violation` 相关逻辑，怀疑“连续超限”实现不正确。
-- 明确提出：
-  - 如果这类连续终止都有同样的问题，就不该只修 torque termination
-  - 应该把实现改成真正按时间连续、按 episode 内状态累积的语义
-- 单独追问 `env.episode_length_buf <= 1` 这一保护条件为什么存在，说明用户已经开始从“现象分析”进入“逐行怀疑实现假设”的阶段。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这里实际上把排查层级提升到了 termination 基础设施本身。
-- 后面 `base_orientation`、`base_height`、`joint_position` 这些 term 的异常，也都能放到这个框架下重新理解。
+- 仅靠训练日志里的汇总指标，难以快速定位具体终止原因。
+- 临时 debug 输出过多，影响诊断主线。
+
+### 解决思路（原因分析）
+
+- `play` 应承担直接暴露终止原因的角色。
+- debug 输出需要收口，保留可复用的定位通道。
+
+### 具体改动
+
+- `play` 终止时直接输出终止原因。
+- 清理此前临时添加的大量 debug 输出。
+- 继续核对当前终止条件是否过严。
+- 相关位置：
+  - `scripts/reinforcement_learning/rsl_rl/play.py`
+  - 终止统计输出相关实现
 
 ## Version 5.0 -> 5.1
 
-### 阶段定义
-- 这一段围绕 `play` 和训练日志调试通道继续收口。
+### 状态
 
-### 来源对话
-- 线程：`019dcd81-3049-7482-a9ec-bce7825e4419`
-- 线程：`019dcd82-9812-7d13-bbac-166e4dabe319`
+- 明显的回归排查和小范围回退。
+- 这一版开始区分“叠改版”和“单点试验版”。
 
-### 这一小版本里补上的关键小修改
-- 用户要求 `play (rsl_rl)` 在终止时直接输出终止原因，同时把之前为了 debug 临时加的一批输出清理掉。
-- 随后马上追问：
-  - 这样会不会拖慢训练 collection
-  - 当前终止条件具体都有哪些
-  - 现在是不是过于严格
-- 在不影响 `sim2real` 的前提下，用户倾向于采用“保留物理约束，但修正终止实现和阈值语义”的方式，而不是简单把终止关掉。
+### 主要问题（表现）
 
-### 这一段的意义
-- 从这里开始，debug 输出本身也被当成一等公民来设计。
-- 也就是说，后续的很多判断并不是靠猜，而是依赖 play/训练时能不能把 termination 原因直接暴露出来。
+- 叠加多项修改后，策略几乎连站都学不会。
+- 某些 reward、termination 和课程参数可能只在局部实现改了，没有进入实际 `rough` 训练配置。
+
+### 解决思路（原因分析）
+
+- 多项同时改动导致回归的风险已经显性化。
+- 部分支撑门控增强值得优先回退。
+
+### 具体改动
+
+- 优先回退部分支撑门控增强。
+- 检查 reward、termination 和课程参数是否真的接到 `rough`。
+- 后续记录开始区分“叠改版”和“单点试验版”。
 
 ## Version 5.1 -> 5.2
 
-### 阶段定义
-- 这一段是一次明显的回归排查与小范围回退。
+### 状态
 
-### 来源对话
-- 线程：`019dd1da-994d-7e22-aec0-9a06401b8b26`
-- 线程：`019dd1de-edcc-79a3-99f6-e7c27dc17c2a`
+- 开始系统利用 `robot_lab/logs` 回溯是哪一版开始坏掉。
+- 版本日志开始具备“回归取证”功能。
 
-### 这一小版本里补上的关键判断
-- 用户指出在做了几类改动之后，机器人已经“连站都学不会”，`mean episode` 最多只有 `9` 左右。
-- 当时一起变动过的有：
-  - 力矩终止条件
-  - `trot` 奖励权重
-  - 工作空间权重
-  - 支撑对称门控
-- 用户随后倾向于先回退支撑门控增强，理由是：
-  - 现在已经有 `gate_d` 这样的软门控
-  - 没必要再额外叠一层容易把信号切没的支持门控
-- 同时再次确认：
-  - rough 里很多 termination/weight 接口并没有全部显式接出来
-  - 动作做了 `clip` 也不代表 joint position 一定不会越界
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一段代表用户已经开始把“多项同时改动导致回归”当成核心风险。
-- 日志里以后也应该尽量注明：某一版是“叠改版”还是“单点试验版”。
+- `done_count` 和 termination 行为在若干轮实验后开始明显异常。
+- `done_count` 降不下来时，无法只靠 reward 判断问题层级。
+
+### 解决思路（原因分析）
+
+- 不能只看参数，还要对照 reward、termination、curriculum、reset 的实现变化。
+- reward 正常但 termination 异常时，应优先怀疑终止和统计链路。
+
+### 具体改动
+
+- 对照不同训练 run 的日志。
+- 回溯 reward、termination、课程和 reset 的实现变化。
+- 继续追踪 `done_count` 与各 termination 曲线。
 
 ## Version 5.2 -> 5.3
 
-### 阶段定义
-- 这一段开始系统利用 `robot_lab/logs` 里的真实实验记录回溯“到底是哪一版开始坏掉”的问题。
+### 状态
 
-### 来源对话
-- 线程：`019dd2c3-9e6e-7e92-aec1-1fec853b106d`
+- 重审支撑对称奖励是否真的在发训练信号。
+- 这一版识别出“reward 存在但长期不发有效梯度”的问题。
 
-### 这一小版本里补上的关键判断
-- 用户把训练日志放进 `robot_lab/logs`，并明确指出：
-  - 在 `2026-04-24 11:16` 那次实验之后，力矩终止行为开始变得奇怪
-  - `4.25` 这次 `done_count` 就不再回落到以前那种十几的正常值
-  - `4.27` 以及之后的 run，`done` 表现也开始异常
-- 用户强调这几次不只是改了实验参数，还改了：
-  - reward 实现
-  - reward 权重
-  - termination 实现
-  - termination 阈值
-- 因而要求的不是“再给新建议”，而是回溯所有这些变化，定位哪一个变化最可能是主因。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这里第一次把“版本化回归分析”正式变成了任务本身。
-- 也就是说，日志不再只是记录修改，而是要支持“哪次开始坏”的取证。
+- 某些支撑对称项长期为零。
+- 不清楚这是设计如此、条件太苛刻，还是该项根本没真正参与训练。
+
+### 解决思路（原因分析）
+
+- 如果必须四脚全接触才给信号，这类 reward 很可能长期不起作用。
+- 需要把硬条件改为更连续的 soft gate。
+
+### 具体改动
+
+- 将“全接触才有信号”的硬条件改成接触比例 soft gate。
+- 重新核对 symmetry augmentation 是否真的启用和记录。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
 
 ## Version 5.3 -> 5.4
 
-### 阶段定义
-- 这一段围绕“长期为零的支撑对称信号”展开，开始重新审视 reward 是否根本没在发有效梯度。
+### 状态
 
-### 来源对话
-- 线程：`019dd2c3-9e6e-7e92-aec1-1fec853b106d`
-- 线程：`019dd83e-e0ed-7d43-a935-b10e6be25315`
+- 将 termination、reward、curriculum、reset 放到同一张回归表中对照。
+- 记录方式从“改了什么”扩展到“拿哪些 run 做了对照”。
 
-### 这一小版本里补上的关键判断
-- 用户后知后觉地追问：自己原本并没有打算把支撑左右对称奖励做成“四脚全接触”才能有信号。
-- 因而这里出现了一次重要语义修正：
-  - 不再要求必须四脚稳定支撑才给左右对称奖励
-  - 改为按接触比例或软门控给信号
-  - 避免 `R/mani/support_left_right_*` 长期全零
-- 同时用户还追问：
-  - 27、28 号加的“对称增强”到底有没有真正记录进实验
-  - symmetry augmentation 是否真的启用了
-  - 当前的 reward/log diff 与自己记忆中的版本是否一致
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步非常关键，因为它意味着某些“看起来加了的奖励”其实长期没产生训练信号。
-- 这类问题比权重大小更隐蔽，也更容易误导后续判断。
+- 单看代码 diff 已经不足以解释训练退化。
+- 不同 run 的课程阈值、reset、命令范围和 action 限制都可能不同。
+
+### 解决思路（原因分析）
+
+- 用回归表统一记录训练条件和结果。
+- 避免把不同训练条件下的现象混成一个结论。
+
+### 具体改动
+
+- 对照不同 run 的：
+  - curriculum 阈值
+  - reset 抖动
+  - `ee_pose` 范围
+  - action `delta_clip`
+  - support symmetry 权重和 std
+  - `done_count` 与各 termination 曲线
 
 ## Version 5.4 -> 5.5
 
-### 阶段定义
-- 这一段开始把 termination、reward、课程、reset 一起放到同一张回归表里做对照。
+### 状态
 
-### 来源对话
-- 线程：`019dd2c3-9e6e-7e92-aec1-1fec853b106d`
+- 回到默认站姿几何、机身高度与 termination 语义的匹配问题。
+- 几何可行性和终止语义开始一起校准。
 
-### 这一小版本里补上的关键判断
-- 用户已经不满足于看单次代码 diff，而是要求把不同 run 的配置和结果并排看。
-- 这时分析已经显式涉及：
-  - 各 run 的 curriculum iteration 阈值
-  - reset 抖动范围
-  - `commands.ee_pose` 的 `x/y/z` 与 `world_z_range`
-  - action `delta_clip`
-  - support symmetry 的权重和 std
-  - `done_count`、`Term/joint_torque_termination`、`Term/base_orientation_termination` 等日志曲线
-- 也开始把 `2026-04-24`、`2026-04-26`、`2026-04-27` 这些 run 作为明确可对照的“版本证据”。
+### 主要问题（表现）
 
-### 这一段的意义
-- 从这里开始，版本日志就不该只写“改了什么”，还应该写“拿哪些 run 做了对照”。
+- 默认站姿可能本身就与当前高度阈值和终止条件错位。
+
+### 解决思路（原因分析）
+
+- 如果默认形态和阈值本身不相容，再怎么训练也会持续撞 termination。
+
+### 具体改动
+
+- 检查默认站姿、机身高度和 termination 阈值是否匹配。
+- 将几何可行性纳入 termination 诊断。
 
 ## Version 5.5 -> 5.6
 
-### 阶段定义
-- 这一段重新回到机身高度、站姿几何和 termination 语义的对应关系。
+### 状态
 
-### 来源对话
-- 线程：`019dd89f-56f1-79f3-abee-ca0f7464f533`
+- 训练器侧的阶段性重置和策略噪声控制进入主线。
+- 版本日志不再只记录环境配置，也开始记录训练脚本机制。
 
-### 这一小版本里补上的关键判断
-- 用户开始围绕 `base_height` 和默认站姿重新审视：
-  - 当前目标高度到底该是多少
-  - 软/硬最低高度阈值是否和真实几何一致
-  - 当前默认腿形在不同目标高度下对应的 thigh/calf 角度大概是什么
-- 这说明当时的问题已经不仅是“终止太严格”，而是“终止阈值是否和默认形态本身不相容”。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这是一次把“几何可行性”和“termination 语义”重新对齐的尝试。
-- 如果默认站姿与高度阈值本身就错位，策略再怎么学也会持续撞终止。
+- 环境之外的 trainer/runtime 逻辑也在影响训练行为。
+
+### 解决思路（原因分析）
+
+- 需要检查 PPO 和训练脚本中的阶段逻辑是否与环境课程一致。
+
+### 具体改动
+
+- 重点关注：
+  - `mani phase reset hook`
+  - 指定 iteration 的重置逻辑
+  - PPO 配置里与 `go2arm` 阶段相关的行为
 
 ## Version 5.6 -> 5.7
 
-### 阶段定义
-- 这一段开始触及训练器侧的阶段性重置和策略噪声控制。
+### 状态
 
-### 来源对话
-- 线程：`019dd906-a864-7543-b4b0-a545d0486b1b`
+- 检查 teacher / privileged 结构和课程实现是否一致。
+- 排查层级从 reward / termination 微调提升到训练架构一致性。
 
-### 这一小版本里补上的关键判断
-- 用户此时已经不只看环境配置，也开始关心训练脚本侧的机制：
-  - `mani phase reset hook`
-  - 指定 iteration 时重置机械臂噪声或相位
-  - PPO 配置里与 `go2arm` 特定阶段相关的逻辑
-- 这说明到这一步，问题边界已经从 env 扩展到 trainer/runtime 行为本身。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步是一个提醒：版本日志不能只记录 `rough_env_cfg.py` 和 `rewards.py`，也要记录训练脚本里那些“不是环境，但会改变训练行为”的机制。
+- 课程、观测和特权结构可能只是表面接入，没有真正形成一致的训练架构。
+
+### 解决思路（原因分析）
+
+- 需要区分“模块存在”和“模块真的在学”。
+- 课程、观测和 privileged encoder 必须共同匹配当前任务设计。
+
+### 具体改动
+
+- 核对：
+  - `curriculum` 是否真正按预期接入。
+  - `legacy_actor_critic` 与 privileged encoder 是否匹配当前观测设计。
+  - `flat` 与 `rough` 的相关结构是否应共用或分开。
 
 ## Version 5.7 -> 5.8
 
-### 阶段定义
-- 这一段开始检查 teacher / privileged 结构和课程实现是不是与当前训练目标保持一致。
+### 状态
 
-### 来源对话
-- 线程：`019ddc88-9f3b-7f62-a2de-5e290ea4493e`
-- 线程：`019ddc9b-dce6-7422-89c9-635094195f87`
+- 将 `gate_d`、小腿接触、mani 落脚点约束和课程衔接问题拆细。
+- 这一版把“门控可能没调好”的直觉落成可复现实验。
 
-### 这一小版本里补上的关键判断
-- 用户此时已经把视角从“参数错没错”进一步转到：
-  - 当前 `curriculum` 实现到底有没有按预期接入
-  - `legacy_actor_critic` 与 privileged encoder 的结构是否和当前观测设计匹配
-  - `flat` 和 `rough` 里某些观测函数是否应当共用或分开
-- 这表明到 `4 月底`，排查已经进入“训练架构和课程架构是否一致”的层面，而不再只是 reward/termination 微调。
+### 主要问题（表现）
 
-### 这一段的意义
-- 这可以视作 `4 月底` 的最新已知主线之一。
-- 也就是说，到目前为止，日志已经从：
-  - 环境能不能跑
-  - reward 怎么调
-  - curriculum 怎么拆
-  - termination 为什么乱
-  逐步进入了
-  - trainer、teacher、privileged 结构与任务设计是否一致
-  的阶段。
+- 近处任务脚落点太近。
+- 远处任务坏姿态终止多。
+- 小腿接触没有稳定计入非法接触。
+- 所有任务都不伸手。
+- 近处任务活得久，但仍然原地踏步。
+
+### 解决思路（原因分析）
+
+- 问题核心很可能在 `loco / mani` 软切换门控 `gate_d` 和偏 `loco` 的前期课程。
+- 目标不是推翻论文方案，而是尽量把论文里的 soft switch 机制调顺。
+
+### 具体改动
+
+- 在 `mani regularization` 中加入落脚点 `xy` 范围约束，参考系为 `base-frame`。
+- 放松姿态终止到更宽区间，并抬高 `loco` 阶段部分 `roll / pitch` 约束。
+- 将小腿加入接触感知。
+- 将 `gate_d` sigmoid 参数调整为：
+  - `l = 0.45`
+  - `mu = 0.65`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 5.8 -> 5.9
 
-### 阶段定义
-- 这一段主要是把 `gate_d`、小腿接触、mani 落脚点约束和课程衔接问题拆细。
-- 相比前面的大框架讨论，这里已经进入“具体要加哪几个小约束、把哪个 sigmoid 参数调到多少”的粒度。
+### 状态
 
-### 来源对话
-- 线程：`019dd83e-18a6-7d70-b2ab-0e48b30c06a8`
+- 继续细化课程衔接。
+- 核心是让 `mani` 更早、更明确参与，而不破坏论文主思路。
 
-### 这一小版本里补上的关键小细节
-- 用户在 `3000` 轮左右对当前策略做了更细的行为归纳：
-  - 支撑或近距离场景下左右脚落点太近
-  - 远距离任务常因坏姿态终止
-  - 小腿存在触地但没有稳定计入非法接触
-  - 所有距离的任务都几乎不伸手
-  - 近处任务只是原地踏步、活得久，但不进入真正站立操作状态
-- 用户明确把第 `4`、`5` 点合并成一个核心判断：
-  - `loco` 与 `mani` 的软切换门控 `gate_d`
-  - 再加上“前期偏 `loco`”的课程
-  很可能共同把手臂压死了
-- 同时用户又坚持一点：
-  - 这是在复现论文，不想轻易放弃“软切换”这个论文主意
-  - 因此优先挖掘 `sigmoid` 参数的潜力，而不是换掉机制
+### 主要问题（表现）
 
-### 这一小版本里直接落到配置层的动作
-- 在 `mani regularization` 中加入“落脚点 `xy` 范围约束（相对机身系）”。
-- 把姿态终止放松到更宽的区间，例如 `0.3-0.4`，同时略微抬高 `loco` 阶段 `roll/pitch` 相关约束权重。
-- 把小腿加入接触感知，但显式提醒要注意此前讨论过的传感器和几何坑。
-- 把 `gate_d` 的 `sigmoid` 参数中的 `l` 调到 `0.45`，`mu` 保持 `0.65` 不变。
+- 纯 `loco` 与纯 `mani` 之间缺少可学习的过渡段。
+- 原来的“中远距离先学 loco，近距离再学 mani”过于粗糙。
 
-### 这一段的意义
-- 这一步把此前“怀疑是门控没调好”的直觉，第一次变成了可复现实验的精确小版本。
-- 也说明你当时并不是想推翻论文方案，而是在尽量把论文方案调到能工作。
+### 解决思路（原因分析）
+
+- 不优先新增“手臂离 base 越远越好”的新 reward。
+- 优先从课程和门控调整入手。
+- 不对 `mu` 和 `l` 再做课程化调度。
+
+### 具体改动
+
+- 缩短纯 `loco` 阶段。
+- `workspace std` 直接固定，不再单独做课程。
+- `x` 从一开始覆盖全距离，不再单独做 `x` curriculum。
+- 加入 `loco + micromani` 过渡段。
+- 过渡段重点逐步放开 `z` 和姿态范围。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
 
 ## Version 5.9 -> 6.0
 
-### 阶段定义
-- 这一段继续细化课程，但重点已经不是“远近怎么切”，而是“怎么在不改论文大思路的前提下，让 `mani` 更早、更明确地参与”。
+### 状态
 
-### 来源对话
-- 线程：`019dd83e-18a6-7d70-b2ab-0e48b30c06a8`
+- 从门控和课程微调升级为训练目标与阶段切换重组。
+- `micromani` 过渡段正式接入课程主线。
 
-### 这一小版本里补上的关键小细节
-- 用户讨论过是否额外增加一个“末端执行器离 `base` 越远越好”的奖励，但没有立刻接受，说明你当时仍然更偏向先从课程和门控下手，而不是急着加新 reward。
-- 明确拒绝对 `mu` 和 `l` 再做课程化调度，说明门控参数在这一版仍然被视作全局常量。
-- 用户开始提出一种更细的课程诉求：
-  - `mani` 应该更早、更明确参与
-  - 在切换阶段里加入那种“loco 基本不变，但必须靠手臂微调才能成功”的样本
-- 进一步补充了命令维度上的事实约束：
-  - 当前不考虑 `y` 范围，基本固定在单值
-  - 当前命令真正可用于课程塑形的主要自由度是 `x/z` 和姿态
-  - 如果想保留 `loco` 又加“micromani”，最现实的是先在 `z` 上做文章
-- 用户最终对课程设计提出更具体的修正：
-  - 纯 `loco` 阶段缩短到 `500` 轮
-  - `workspace std` 从一开始就固定为 `0.1`，不再给它单独做课程
-  - 纯 `loco` 的 `x` 直接覆盖全距离 `0.4-1.6m`
-  - `500-1000` 轮做 `loco + micromani`
-  - 这一阶段逐渐放开 `z` 和姿态范围
-  - 后续再接回原本课程主干，但不再对 `x` 做课程
+### 主要问题（表现）
 
-### 这一段的意义
-- 这里不是“又换一套课程”，而是把课程中的“桥接段”第一次明确成了 `micromani` 概念。
-- 这个概念对后面理解“为什么伸手一直学不出来”非常重要，因为它试图把“纯走”和“纯伸手”之间补上一段可学习过渡。
+- 只调局部参数已经不足以处理“纯走”“轻操纵过渡”“明确操纵”的目标链。
+- 失败终止没有显式进入总奖励语义。
+
+### 解决思路（原因分析）
+
+- 需要把训练目标链拆得更清楚。
+- 总奖励也要能区分成功结束和失败结束。
+
+### 具体改动
+
+- `micromani` 过渡段正式提出并接入课程主线。
+- 失败终止开始被显式写进总奖励语义。
+- `loco` 阶段不再通过固定 gate 人为隔离。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
 
 ## Version 6.0 -> 6.1
 
-### 阶段定义
-- 这一段开始把注意力放到“特权编码器到底有没有真的在更新”。
-- 它不再停留在结构有没有接上，而是进入“训练中梯度是否真的流经这里”的层面。
+### 状态
 
-### 来源对话
-- 线程：`019ddc87-de3f-7360-835f-21e88fc93fb7`
+- 非成功终止惩罚加入总奖励。
+- 总奖励开始显式区分“成功结束”和“失败结束”。
 
-### 这一小版本里补上的关键小细节
-- 用户先问“当前 `go2arm` 任务里的特权信息编码器有没有更新”，随后立刻澄清成更具体的问题：
-  - 不是只问结构在不在
-  - 而是问训练过程中这里到底有没有梯度更新
-- 这说明到 `4/30` 时，你已经意识到：
-  - privileged encoder 虽然名义上存在
-  - 但如果没有被真正训练，很多关于 teacher / critic / privileged 的设计都可能只是表面接入
+### 主要问题（表现）
 
-### 这一段的意义
-- 这一步很关键，因为它把“代码上存在某个模块”和“这个模块真的在学”这两件事正式区分开了。
+- 仅靠存活长度和局部 reward 增长，无法区分“真的接近成功”和“只是没立刻倒”。
+
+### 解决思路（原因分析）
+
+- 失败终止必须在总奖励里有明确代价。
+- 成功结束和失败结束不能只靠 episode length 间接区分。
+
+### 具体改动
+
+- 除成功终止外，其余终止统一加 `-2` 惩罚。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
 
 ## Version 6.1 -> 6.2
 
-### 阶段定义
-- 这一段把训练策略网络本身拉进了主线，而不再只调环境、奖励和课程。
+### 状态
 
-### 来源对话
-- 线程：`019ddc9b-dce6-7422-89c9-635094195f87`
+- 取消 `loco` 阶段固定 gate，并开始关注策略网络结构。
+- 排查从任务设计扩展到训练架构问题。
 
-### 这一小版本里补上的关键小细节
-- 用户先加入了一个总奖励层面的终止惩罚项思路：
-  - 如果因为任务成功之外的原因终止，给一个 `-2` 的惩罚
-- 同时要求在 `loco` 阶段取消“固定 gate”，改回正常计算，说明你当时开始担心 warmup 期间过强的人为门控会污染后续行为。
-- 更重要的是，用户开始明确怀疑当前策略网络输出头设计会导致课程切换后遗忘：
-  - 之前是最后一层直接同时输出 `leg` 和 `arm` 动作
-  - 这样在进入 `loco+mani` 后，后段梯度耦合太强，容易把已经学会的 `loco` 拉坏
-- 因而提出新的结构想法：
-  - 前面共享编码
-  - 后面 `leg` / `arm` 分头输出
-  - 共享编码不是“特权编码器本身”，而是 privileged + observation 合并后前面若干层
-- 还追问当前到底启用了哪种实现，并要求：
-  - 不要再根据本机 `rsl_rl` 版本条件分流
-  - 直接把新入口同步成想要的旧语义，或者干脆强制走旧实现
+### 主要问题（表现）
 
-### 这一段的意义
-- 到这里，问题已经从“课程和 reward 怎么调”进一步升级成“当前策略头设计是否天然不利于分阶段学习”。
-- 这可以视作 `4 月底` 的另一个关键转折点：你开始从任务设计问题，走向训练架构问题。
+- `loco` 阶段存在固定 gate 的思路或实现痕迹。
+- 当前最后一层直接同时输出 `leg` 和 `arm` 动作，可能导致进入 `loco + mani` 后遗忘已学到的 `loco`。
+- privileged encoder 结构虽然存在，但需要确认是否真的有梯度流过。
 
-## 零散补记
+### 解决思路（原因分析）
 
-下面这些对主线影响不如上面几个版本大，但确实是当时的有效工程细节，也一并补上：
+- soft switch 的语义必须前后一致，不能训练早期一套、后期另一套。
+- 如果 reward 和课程都改过但行为仍偏单一，问题也可能出在动作头耦合过强。
 
-- `4/30` 你单独问过 `play` 如何指定模型，说明当时已经开始频繁做 checkpoint 对比，而不是只盯最新训练结果。
-- `4/26` 到 `4/27` 之间，你多次追问“命令行没有输出是不是代表 reset 正常”，这反映出 reset/debug 通道当时并不透明。
-- `4/26` 的 flat 终止问题里，你还额外注意到一个细节：虽然 torque reward 惩罚看着差不多，但 termination 比例完全不同，这种“reward 没变但 done 爆了”的现象后来成为一条持续的排查线索。
+### 具体改动
+
+- 取消 `loco` 阶段固定 gate，恢复正常 gate 计算。
+- 统一旧入口和新入口的语义，不再随本机 `rsl_rl` 版本条件分流。
+- 训练网络结构方向：
+  - 前端共享编码。
+  - 后端 `leg / arm` 分头输出。
+  - 共享部分指 privileged 与普通观测合并后的前几层，而不是 privileged encoder 本身。
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - curriculum / gate 相关配置
+  - trainer / PPO 配置与 actor-critic 结构相关实现
+
