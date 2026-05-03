@@ -520,6 +520,22 @@ basic 分支是线性叠加的工程稳定项，主要包括：
 - rough-terrain progression 被关闭
 - 动作、观测、命令、奖励、课程和终止逻辑整体保持一致
 
+
+### Go2Arm 调整日志
+
+为便于持续记录实现过程中的问题、排查、修改和阶段性结论，新增了一份独立日志：
+
+- `go2arm_tuning_log.md`
+
+记录内容包括：
+
+- 训练或 `play` 中观察到的异常现象
+- 对问题来源的假设与排查路径
+- 对 reward / observation / command / curriculum / event / termination 等的具体修改
+- 修改前后的对比结果
+- 暂时无效但值得保留的失败尝试
+
+
 ## Citation
 
 This repository is a modified version of `robot_lab`.
