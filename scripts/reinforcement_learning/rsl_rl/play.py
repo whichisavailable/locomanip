@@ -54,6 +54,12 @@ parser.add_argument(
     default=None,
     help="Fixed Go2Arm ee target orientation for play in base-frame roll/pitch/yaw radians.",
 )
+parser.add_argument(
+    "--go2arm_trace_actions",
+    action="store_true",
+    default=False,
+    help="Print Go2Arm action and joint state diagnostics during play.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -91,6 +97,7 @@ from isaaclab.envs import (
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.utils.assets import retrieve_file_path
 from isaaclab.utils.dict import print_dict
+from isaaclab.utils.math import subtract_frame_transforms
 
 from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper, export_policy_as_jit, export_policy_as_onnx
 from isaaclab_rl.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
@@ -117,6 +124,54 @@ def _print_go2arm_termination_reasons(extras: dict) -> None:
         state = "truncated" if item.get("truncated") else "terminated"
         reasons = ", ".join(item.get("reasons", ())) or "unknown"
         print(f"[TERMINATION env{env_id}] {state}: {reasons}")
+
+
+def _print_go2arm_action_state(env, policy_action: torch.Tensor, step: int) -> None:
+    """Print one compact Go2Arm action snapshot for play-time debugging."""
+    robot = env.unwrapped.scene["robot"]
+    action_manager = env.unwrapped.action_manager
+
+    effective_action = getattr(env.unwrapped, "_go2arm_effective_action", None)
+    current_action = action_manager.action[0].detach().cpu()
+    policy_action = policy_action.detach().cpu()
+    if effective_action is not None:
+        effective_action = effective_action[0].detach().cpu()
+    else:
+        effective_action = current_action
+    prev_action = action_manager.prev_action[0].detach().cpu()
+    joint_pos = robot.data.joint_pos[0].detach().cpu()
+    default_joint_pos = robot.data.default_joint_pos[0].detach().cpu()
+    root_pos_w = robot.data.root_pos_w[0].detach().cpu()
+    root_quat_w = robot.data.root_quat_w[0].detach().cpu()
+    ee_idx = robot.body_names.index("link6")
+    ee_pos_w = robot.data.body_pos_w[0, ee_idx].detach().cpu()
+    ee_quat_w = robot.data.body_quat_w[0, ee_idx].detach().cpu()
+    ee_pos_b, _ = subtract_frame_transforms(root_pos_w, root_quat_w, ee_pos_w, ee_quat_w)
+    ee_pos_b = ee_pos_b.detach().cpu()
+
+    joint_delta = joint_pos - default_joint_pos
+    arm_action = current_action[-6:]
+    effective_arm_action = effective_action[-6:]
+    policy_arm_action = policy_action[-6:]
+    arm_joint_delta = joint_delta[-6:]
+    arm_joint_pos = joint_pos[-6:]
+
+    print(
+        "[GO2ARM PLAY step={}] policy_norm={:.3f} exec_norm={:.3f} prev_norm={:.3f} base_w={} ee_w={} ee_b={} policy_arm={} exec_arm={} masked_arm={} arm_joint_delta={} arm_joint_pos={}".format(
+            step,
+            float(policy_action.norm().item()),
+            float(current_action.norm().item()),
+            float(prev_action.norm().item()),
+            [round(float(x), 3) for x in root_pos_w.tolist()],
+            [round(float(x), 3) for x in ee_pos_w.tolist()],
+            [round(float(x), 3) for x in ee_pos_b.tolist()],
+            [round(float(x), 3) for x in policy_arm_action.tolist()],
+            [round(float(x), 3) for x in effective_arm_action.tolist()],
+            [round(float(x), 3) for x in arm_action.tolist()],
+            [round(float(x), 3) for x in arm_joint_delta.tolist()],
+            [round(float(x), 3) for x in arm_joint_pos.tolist()],
+        )
+    )
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -151,6 +206,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.curriculum.command_levels_ang_vel = None
     if "go2arm" in task_name.lower():
         env_cfg.enable_play_termination_reason_logging = True
+        if hasattr(env_cfg, "actions") and hasattr(env_cfg.actions, "joint_pos"):
+            # Play starts a fresh environment counter at 0, so the training-time fixed arm freeze
+            # would otherwise be active again for many steps. Disable it here to observe the
+            # policy's real arm output during play.
+            env_cfg.actions.joint_pos.fixed_delta_action_until_iteration = 0
+            print("[INFO] Go2Arm play override: disabled fixed arm-action freeze for playback.")
     go2arm_fixed_target = args_cli.go2arm_ee_pos is not None or args_cli.go2arm_ee_rpy is not None
     if go2arm_fixed_target and hasattr(env_cfg.curriculum, "go2arm_reaching_stages"):
         env_cfg.curriculum.go2arm_reaching_stages = None
@@ -310,20 +371,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
 
     dt = env.unwrapped.step_dt
+    use_mean_action = "go2arm" in task_name.lower()
+    if use_mean_action and not hasattr(policy_nn, "act_inference"):
+        print("[INFO] Go2Arm play fallback: policy has no act_inference(); using policy(obs) instead.")
 
     # reset environment
     obs = env.get_observations()
     timestep = 0
+    trace_step = 0
+    trace_interval = 20 if args_cli.go2arm_trace_actions else None
+    prev_arm_joint_pos = None
+    prev_ee_pos_b = None
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
-            actions = policy(obs)
+            if use_mean_action and hasattr(policy_nn, "act_inference"):
+                actions = policy_nn.act_inference(obs)
+            else:
+                actions = policy(obs)
             # env stepping
             obs, _, dones, extras = env.step(actions)
             _print_go2arm_termination_reasons(extras)
+            if trace_interval is not None and timestep % trace_interval == 0:
+                _print_go2arm_action_state(env, actions[0], trace_step)
+            trace_step += 1
             # reset recurrent states for episodes that have terminated
             policy_nn.reset(dones)
         if args_cli.video:

@@ -243,6 +243,16 @@ class Go2ArmManagerBasedRLEnv(ManagerBasedRLEnv):
         z_world = float(target_pos_w[2])
         low_range = getattr(command_cfg, "secondary_world_z_range", None)
         high_range = getattr(command_cfg, "tertiary_world_z_range", None)
+        # After the final stage, the curriculum disables explicit low/high secondary
+        # samplers and uses one full z range. Keep episode length buckets comparable.
+        if low_range is None or high_range is None:
+            world_z_range = getattr(command_cfg, "world_z_range", None)
+            if world_z_range is not None:
+                world_z_min, world_z_max = float(world_z_range[0]), float(world_z_range[1])
+                if low_range is None and world_z_min < 0.40:
+                    low_range = (world_z_min, min(0.40, world_z_max))
+                if high_range is None and world_z_max > 0.80:
+                    high_range = (max(0.80, world_z_min), world_z_max)
         z_tag = "z_normal"
         if low_range is not None and float(low_range[0]) <= z_world <= float(low_range[1]):
             z_tag = "z_low_hard"

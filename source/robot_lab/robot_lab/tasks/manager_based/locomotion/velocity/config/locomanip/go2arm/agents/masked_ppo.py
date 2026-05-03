@@ -243,9 +243,9 @@ class MaskedActionPPO(PPO):
         except TypeError:
             load_iteration = super().load(loaded_dict)
         if load_iteration:
-            self._action_mask_update_count = int(
-                loaded_dict.get("action_mask_update_count", loaded_dict.get("iter", self._action_mask_update_count))
-            )
+            checkpoint_iteration = int(loaded_dict.get("iter", self._action_mask_update_count))
+            mask_update_count = int(loaded_dict.get("action_mask_update_count", checkpoint_iteration))
+            self._action_mask_update_count = max(mask_update_count, checkpoint_iteration)
         return load_iteration
 
     def _legacy_act(self, obs, critic_obs=None) -> torch.Tensor:
@@ -487,6 +487,8 @@ class MaskedActionPPO(PPO):
         print("[go2arm debug] actor:", type(getattr(policy, "actor", None)).__name__)
         print("[go2arm debug] action_mask:", self.action_mask)
         print("[go2arm debug] action_mask_until_iteration:", self.action_mask_until_iteration)
+        print("[go2arm debug] action_mask_update_count:", self._action_mask_update_count)
+        print("[go2arm debug] mask_active:", self._active_action_mask() is not None)
 
     def _debug_print_go2arm_gradients(self, policy) -> None:
         if not self._debug_go2arm_mask:

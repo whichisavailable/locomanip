@@ -205,6 +205,65 @@ def _install_go2arm_mani_phase_reset_hook(runner, agent_cfg) -> None:
     runner.alg.act = act_with_go2arm_mani_reset
 
 
+def _sync_resume_iteration_to_env(runner, env, agent_cfg) -> None:
+    """Sync RSL-RL resume iteration into env counters used by Go2Arm curriculum/action masking."""
+    raw_env = getattr(env, "unwrapped", env)
+    if not hasattr(raw_env, "common_step_counter"):
+        return
+
+    current_iteration = int(getattr(runner, "current_learning_iteration", 0))
+    if current_iteration <= 0:
+        return
+
+    runner_cfg = getattr(runner, "cfg", {})
+    num_steps_per_env = int(getattr(agent_cfg, "num_steps_per_env", runner_cfg.get("num_steps_per_env", 1)))
+    resume_step = current_iteration * max(num_steps_per_env, 1)
+    previous_step = int(getattr(raw_env, "common_step_counter", 0))
+    raw_env.common_step_counter = max(previous_step, resume_step)
+
+    alg = getattr(runner, "alg", None)
+    action_mask_until_iteration = getattr(alg, "action_mask_until_iteration", None)
+    if action_mask_until_iteration is not None and current_iteration >= int(action_mask_until_iteration):
+        alg.action_mask = None
+        alg.action_mask_until_iteration = 0
+        print(f"[INFO] Disabled completed PPO action mask at resumed iteration {current_iteration}.")
+
+    action_term = None
+    if hasattr(raw_env, "action_manager"):
+        try:
+            action_term = raw_env.action_manager.get_term("joint_pos")
+        except KeyError:
+            action_term = None
+    fixed_until_iteration = getattr(getattr(action_term, "cfg", None), "fixed_delta_action_until_iteration", None)
+    if fixed_until_iteration is not None and current_iteration >= int(fixed_until_iteration):
+        action_term.cfg.fixed_delta_action_until_iteration = 0
+        if hasattr(raw_env.cfg, "actions") and hasattr(raw_env.cfg.actions, "joint_pos"):
+            raw_env.cfg.actions.joint_pos.fixed_delta_action_until_iteration = 0
+        print(f"[INFO] Disabled completed env fixed arm-action mask at resumed iteration {current_iteration}.")
+
+    # The wrapper reset recomputes curriculum terms before command/event reset, so commands and
+    # reset ranges immediately match the resumed training stage instead of the fresh-env stage.
+    env.reset()
+    if hasattr(raw_env, "command_manager"):
+        try:
+            ee_pose_cfg = raw_env.command_manager.get_term("ee_pose").cfg
+        except KeyError:
+            ee_pose_cfg = None
+        if ee_pose_cfg is not None:
+            print(
+                "[INFO] Go2Arm resumed ee_pose curriculum: "
+                f"world_z_range={ee_pose_cfg.world_z_range}, "
+                f"secondary_world_z_range={ee_pose_cfg.secondary_world_z_range}, "
+                f"secondary_sample_prob={ee_pose_cfg.secondary_sample_prob}, "
+                f"tertiary_world_z_range={ee_pose_cfg.tertiary_world_z_range}, "
+                f"tertiary_sample_prob={ee_pose_cfg.tertiary_sample_prob}"
+            )
+    print(
+        "[INFO] Synced env common_step_counter for resume: "
+        f"iteration={current_iteration}, step={raw_env.common_step_counter}"
+    )
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     """Train with RSL-RL agent."""
@@ -325,6 +384,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
         runner.load(resume_path)
+        _sync_resume_iteration_to_env(runner, env, agent_cfg)
 
     _install_go2arm_mani_phase_reset_hook(runner, agent_cfg)
 
