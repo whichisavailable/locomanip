@@ -115,15 +115,15 @@ Primary implementation files:
 - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
 - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/observations.py`
 
-#### Actions
+#### 动作设计
 
-`go2arm` uses an 18D default-centered delta joint-position action:
+`go2arm` 当前使用 **18 维、以默认姿态为中心的 delta joint-position action**：
 
 ```text
 target_joint_pos = default_joint_pos + clipped_delta_action
 ```
 
-Joint order:
+关节顺序固定为：
 
 ```text
 FL_hip_joint, FL_thigh_joint, FL_calf_joint,
@@ -133,59 +133,59 @@ RR_hip_joint, RR_thigh_joint, RR_calf_joint,
 joint1, joint2, joint3, joint4, joint5, joint6
 ```
 
-Design points:
+设计要点：
 
-- Zero action means staying near the robot default pose, not sending every joint to `0 rad`.
-- Clipping is applied to the **delta**, not the final joint target.
-- `scale=1.0`, so the policy output is interpreted directly as a joint offset in radians.
-- For the first `500` iterations, arm deltas are forcibly fixed to `0.0`, so the early stage is effectively locomotion-only.
+- 零动作表示保持在默认关节姿态附近，而不是把所有关节直接打到 `0 rad`。
+- clip 施加在 **delta** 上，而不是施加在最终关节目标上。
+- `scale=1.0`，因此策略输出可直接解释为关节偏移量，单位是弧度。
+- 前 `500` 个 iteration 会强制把机械臂 6 个关节的 delta 固定为 `0.0`，因此早期阶段本质上是 locomotion-only。
 
-The rough config further expands the allowed delta ranges. In particular:
+`rough` 配置进一步把可用的 delta 范围放宽。典型值包括：
 
-- leg hip joints: about `[-0.83776, 0.83776]`
-- front thigh joints: about `[-1.86465, 2.18455]`
-- rear thigh joints: about `[-0.81745, 3.23175]`
-- calf joints: about `[-1.03421, 0.47375]`
-- arm joints use wider task-specific safe ranges instead of a tiny symmetric clip
+- 腿部 `hip` 关节约为 `[-0.83776, 0.83776]`
+- 前腿 `thigh` 关节约为 `[-1.86465, 2.18455]`
+- 后腿 `thigh` 关节约为 `[-0.81745, 3.23175]`
+- `calf` 关节约为 `[-1.03421, 0.47375]`
+- 机械臂 6 个关节使用更宽的任务安全范围，而不是很小的对称 clip
 
-#### Observations
+#### 观测设计
 
-The task uses three observation groups:
+当前任务将观测分成三组：
 
-- `policy`: actor-facing core observations
-- `privileged`: teacher / privileged observations
-- `critic_extra`: extra critic-only observations
+- `policy`：给 actor 使用的核心观测
+- `privileged`：给 teacher / privileged 分支使用的特权观测
+- `critic_extra`：给 critic 额外使用的观测
 
-##### Core policy observations
+##### 核心观测（policy）
 
-The core observation vector is **92D** and is concatenated in this order:
+核心观测总维度为 **92D**，按如下顺序拼接：
 
-| Term | Dim | Meaning |
+| 项 | 维度 | 含义 |
 | --- | ---: | --- |
-| `joint_pos` | 18 | relative joint positions for all leg and arm joints |
-| `joint_vel` | 18 | relative joint velocities |
-| `ee_current_pose` | 12 | current `link6` pose in `base_link` frame: `3D position + 9D rotation matrix` |
-| `actions` | 18 | previously executed effective action |
-| `ee_pose_command` | 12 | current end-effector target command |
-| `base_lin_vel` | 3 | base linear velocity |
-| `base_ang_vel` | 3 | base angular velocity |
-| `projected_gravity` | 3 | gravity projected into base frame |
-| `reference_tracking_error` | 1 | decaying reference tracking error |
-| `gait_phase` | 4 | four trot phase sine signals |
+| `joint_pos` | 18 | 腿部和机械臂全部关节的相对位置 |
+| `joint_vel` | 18 | 腿部和机械臂全部关节的相对速度 |
+| `ee_current_pose` | 12 | `link6` 在 `base_link` 坐标系下的当前位姿：`3D 位置 + 9D 旋转矩阵` |
+| `actions` | 18 | 上一步实际执行的 effective action |
+| `ee_pose_command` | 12 | 当前末端目标命令 |
+| `base_lin_vel` | 3 | 基座线速度 |
+| `base_ang_vel` | 3 | 基座角速度 |
+| `projected_gravity` | 3 | 重力在 base frame 下的投影 |
+| `reference_tracking_error` | 1 | 随时间衰减的参考跟踪误差 |
+| `gait_phase` | 4 | 四条腿的 trot 相位正弦信号 |
 
-Important details:
+几个关键点：
 
-- Both the current EE pose and the target EE pose are represented in the base frame.
-- The action observation uses the **effective** action after early-stage arm freezing, so observations stay aligned with executed behavior.
-- `gait_phase` is generated with `cycle_time = 0.5` and phase offsets `(0.0, 0.5, 0.5, 0.0)`.
+- 当前 EE 位姿和目标 EE 位姿都在 **base frame** 下表达。
+- `actions` 读取的是经过早期机械臂冻结后的 **effective action**，因此观测和真实执行行为保持一致。
+- `gait_phase` 使用 `cycle_time = 0.5` 和相位偏置 `(0.0, 0.5, 0.5, 0.0)` 生成。
 
-##### Privileged observations
+##### 特权观测（privileged）
 
-These are mainly terrain, contact, disturbance, and external-force signals:
+特权观测主要提供地形、接触、外力和扰动信息，包括：
 
 - `base_height`
 - `foot_heights`
-- `feet_contact_forces` (flattened 12D)
+- `feet_contact_forces`，展平后为 12D
 - `static_friction`
 - `base_external_wrench`
 - `base_external_push_velocity`
@@ -196,31 +196,31 @@ These are mainly terrain, contact, disturbance, and external-force signals:
 - `feet_planar_velocities_w`
 - `observation_delay`
 
-##### Critic extra observation
+##### Critic 额外观测
 
 - `cumulative_tracking_error`
 
-#### Commands
+#### 命令设计
 
-The task currently keeps only one command term: `ee_pose`.
+当前任务只保留一个命令项：`ee_pose`。
 
-This is a fixed end-effector pose command for `link6`, with several important semantics:
+它表示 `link6` 的固定末端位姿目标，主要语义如下：
 
-- The command is resampled only at reset and then held fixed for the entire episode.
-- The command exposed to the policy is 12D: `3D target position + 9D target rotation matrix`.
-- Sampling is primarily done in the **base frame** for `x/y` and orientation.
-- `z` can be sampled separately in the **world frame**, which makes staged reaching curriculum easier to define around ground height.
-- A reject cuboid near the robot body removes obviously bad or unreachable targets.
-- If repeated sampling fails, the implementation falls back to the center of the range so the command always remains valid.
+- 只在 reset 时重采样一次，之后整个 episode 内保持不变。
+- 对策略暴露的命令是 12D：`3D target position + 9D target rotation matrix`。
+- 主要在 **base frame** 中对 `x/y` 和姿态进行采样。
+- `z` 可以单独在 **world frame** 中采样，这样更容易围绕地面高度组织 staged curriculum。
+- 机身附近有一个 reject cuboid，用于过滤明显不合理或不可达的目标。
+- 如果多次采样仍失败，实现会回退到采样范围中心点，以保证命令始终有效。
 
-The teacher command config starts from a generic base-frame workspace, but `rough_env_cfg.py` overrides it into a staged forward-reaching curriculum:
+teacher 的基础命令空间会在 `rough_env_cfg.py` 中被改写成一个分阶段的前向 reaching curriculum：
 
-- `x` fixed to `[0.40, 1.60]`
-- `y` fixed to `0.0`
-- locomotion warmup keeps world `z` fixed at `0.7126649548`
-- locomotion warmup keeps pitch fixed at `1.5008926535`
+- `x` 固定在 `[0.40, 1.60]`
+- `y` 固定为 `0.0`
+- locomotion warmup 阶段把 world `z` 固定在 `0.7126649548`
+- locomotion warmup 阶段把 pitch 固定在 `1.5008926535`
 
-The command term also maintains internal error state:
+命令项内部还会维护一组误差状态：
 
 - `position_tracking_error`
 - `orientation_tracking_error`
@@ -228,11 +228,11 @@ The command term also maintains internal error state:
 - `reference_tracking_error = max(initial_tracking_error - v * t, 0)`
 - `cumulative_tracking_error`
 
-These are reused by observations, reward gating, and debug logging.
+这些量会被观测、reward gating 和 debug logging 复用。
 
-#### Rewards
+#### 奖励设计
 
-The task does not simply sum locomotion and manipulation rewards. It uses a gated total reward:
+这个任务不是简单地把 locomotion reward 和 manipulation reward 直接相加，而是使用一个 **门控总奖励**：
 
 ```text
 total_reward =
@@ -242,25 +242,25 @@ total_reward =
   + workspace_position_reward
 ```
 
-The gate is:
+门控项为：
 
 ```text
 D = sigmoid((5 / gating_l) * (reference_tracking_error - gating_mu))
 ```
 
-Current rough-task gate parameters:
+当前 rough 配置中的门控参数为：
 
 - `gating_mu = 0.65`
 - `gating_l = 0.45`
 
-Interpretation:
+直观理解：
 
-- large reaching error -> reward leans more toward manipulation
-- smaller reaching error -> reward leans more toward locomotion stability
+- 当 reaching 误差较大时，总奖励更偏向 manipulation
+- 当 reaching 误差较小时，总奖励更偏向 locomotion 稳定性
 
-##### Manipulation reward
+##### Manipulation 奖励
 
-The manipulation branch is:
+manipulation 分支形式为：
 
 ```text
 mani_total =
@@ -273,28 +273,28 @@ mani_total =
   - cumulative_error_penalty
 ```
 
-Current rough config emphasizes:
+当前 rough 配置里，manipulation 主要强调：
 
-- end-effector position tracking
-- end-effector orientation tracking
+- 末端位置跟踪
+- 末端姿态跟踪
 - potential-based progress
-- cumulative tracking error penalty
-- support stability and anti-cheating regularization
+- 累积跟踪误差惩罚
+- 与“支撑稳定性 / 防作弊”相关的 regularization
 
-The manipulation regularization currently includes:
+当前 manipulation regularization 包含：
 
-- support roll stability
-- support foot slide penalty
-- support foot air penalty
-- non-foot contact penalty
-- target-height-conditioned pitch regularization
-- minimum base height regularization
-- arm posture deviation penalty
-- arm joint-limit safety penalty
-- left-right support symmetry
-- support foot XY workspace regularization
+- 支撑期间的 `support_roll` 稳定性
+- 支撑足滑动惩罚
+- 支撑足离地惩罚
+- 非足端接触惩罚
+- 随目标高度变化的 pitch regularization
+- base 最低高度 regularization
+- 机械臂姿态偏离默认位形惩罚
+- 机械臂关节接近 joint limit 的安全惩罚
+- 左右支撑对称性
+- 足端在 XY 平面中的支撑范围 regularization
 
-Representative rough-task weights:
+代表性的 rough 权重包括：
 
 - `support_feet_slide_weight = 0.10`
 - `support_foot_air_weight = 0.16`
@@ -304,9 +304,9 @@ Representative rough-task weights:
 - `posture_deviation_weight = 0.035`
 - `joint_limit_safety_weight = 0.10`
 
-##### Locomotion reward
+##### Locomotion 奖励
 
-The locomotion branch is:
+locomotion 分支形式为：
 
 ```text
 loco_total =
@@ -315,22 +315,22 @@ loco_total =
   - moving_arm_joint_velocity_penalty
 ```
 
-This branch is not driven by a separate base-velocity command. Instead, it is coupled to the reaching process through the EE tracking errors.
+这个分支不是由一个独立的 base-velocity command 驱动的，而是通过 EE tracking error 与 reaching 过程耦合。
 
-The locomotion regularization includes:
+当前 locomotion regularization 包含：
 
-- base height
-- base roll and pitch
-- base roll / pitch angular velocity
-- base vertical velocity
-- base lateral drift
-- leg posture deviation
-- touchdown left-right symmetry
-- touchdown foot y-distance
-- diagonal foot symmetry
-- soft trot contact regularization
+- base 高度
+- base 的 roll / pitch
+- base 的 roll / pitch 角速度
+- base 的竖直速度
+- base 的侧向漂移
+- 腿部姿态偏离
+- touchdown 左右对称性
+- touchdown 足端 y 向间距
+- 对角足对称性
+- soft trot 接触 regularization
 
-Representative rough-task weights:
+代表性的 rough 权重包括：
 
 - `base_height_weight = 0.08`
 - `base_roll_weight = 0.16`
@@ -341,21 +341,21 @@ Representative rough-task weights:
 - `loco_arm_swing_weight = 0.15`
 - `loco_arm_dynamic_weight = 0.01`
 
-The `feet_contact_soft_trot` term is especially important. It acts as a soft gait-shaping factor using phase, contact, foot height, and foot velocity, rather than a hard gait controller.
+其中 `feet_contact_soft_trot` 非常关键。它不是一个硬编码 gait controller，而是利用 phase、contact、足端高度和足端速度构造出的软 gait-shaping 因子。
 
-##### Basic reward
+##### Basic 奖励
 
-The basic branch is a linear engineering-stability term:
+basic 分支是线性叠加的工程稳定项，主要包括：
 
-- alive reward
-- non-success termination penalty
-- collision penalty
-- first-order action smoothness penalty
-- second-order action smoothness penalty
-- joint torque squared penalty
-- joint power penalty
+- 存活奖励
+- 非成功终止惩罚
+- 碰撞惩罚
+- 一阶动作平滑惩罚
+- 二阶动作平滑惩罚
+- 关节力矩平方惩罚
+- 关节功率惩罚
 
-Representative rough-task values:
+代表性的 rough 配置值包括：
 
 - `basic_is_alive_weight = 0.2`
 - `basic_termination_penalty_weight = -2.0`
@@ -365,7 +365,7 @@ Representative rough-task values:
 - `basic_joint_torque_sq_weight = -1.6e-3`
 - `basic_joint_power_weight = -1.32e-2`
 
-There is also an extra workspace-position shaping term with:
+此外还额外加入了一个工作空间位置 shaping 项：
 
 - `workspace_position_weight = 0.5`
 - `workspace_position_x_min = 0.30`
@@ -373,112 +373,112 @@ There is also an extra workspace-position shaping term with:
 - `workspace_position_y_weight = 1.0`
 - `workspace_position_std = 0.1`
 
-#### Curriculum
+#### 课程设计
 
-`go2arm` uses a clear staged curriculum through `go2arm_reaching_stages`.
+`go2arm` 通过 `go2arm_reaching_stages` 实现了一个比较明确的 staged curriculum。
 
 ##### Stage 0: `0 ~ 500` iterations
 
 - locomotion-only warmup
-- arm delta action fixed to `0`
-- forward target range stays fixed
+- 机械臂 delta action 固定为 `0`
+- 前向目标范围保持不变
 - `world z = 0.7126649548`
 - `pitch = 1.5008926535`
-- reset noise kept small
+- reset 扰动保持较小
 
 ##### Stage 1: `500 ~ 1000`
 
-- unlock arm motion
-- expand `world z` from the default height toward `[0.45, 0.75]`
-- expand orientation range toward:
+- 解锁机械臂动作
+- 将 `world z` 从默认高度逐步扩展到 `[0.45, 0.75]`
+- 将姿态范围扩展到：
   - `roll  [-0.35, 0.35]`
   - `pitch [-0.35, 0.35]`
   - `yaw   [-1.20, 1.20]`
 
 ##### Stage 2: `1000 ~ 3000`
 
-- keep the main forward-reaching distribution
-- introduce secondary low-z and tertiary high-z samples
-- initial low/high sample probabilities are `0.08 / 0.08`
-- they later increase toward `0.20 / 0.20`
-- base-height termination is relaxed as low-z reaching becomes more common
+- 保持主 forward-reaching 分布
+- 引入 secondary 的 low-z 样本和 tertiary 的 high-z 样本
+- 初始 low/high 采样概率为 `0.08 / 0.08`
+- 后续逐渐增大到 `0.20 / 0.20`
+- 随着 low-z 样本增多，会同步放宽 base-height termination
 
 ##### Stage 3: `3000+`
 
-- remove secondary and tertiary mixture sampling
-- switch to the full world-z range `[0.10, 1.10]`
-- further widen reset perturbations
-- use the full practical target orientation range
+- 去掉 secondary 和 tertiary 的混合采样
+- 切换到完整的 world-z 范围 `[0.10, 1.10]`
+- 进一步增大 reset 扰动
+- 使用完整的实用目标姿态范围
 
-The curriculum does more than change commands. It also co-schedules:
+这个 curriculum 不只是修改命令空间，还会联动调节：
 
-- reset joint position and velocity noise
-- reset root `x/y/yaw` perturbations
-- workspace shaping strength
-- base-height termination thresholds
+- reset 时的关节位置和速度扰动
+- reset root 的 `x/y/yaw` 扰动
+- workspace shaping 强度
+- base-height termination 阈值
 
-#### Events and Randomization
+#### Events 与随机化
 
-Events are organized into startup, reset, and interval categories.
+当前 events 主要分成 startup、reset 和 interval 三类。
 
 ##### Startup event
 
 - `scale_arm_mass_validation`
-  - applied once at startup
-  - targets `arm_mount` and `link1~link6`
-  - currently acts as the validation-side mass override described in the code comments
+  - 只在 startup 执行一次
+  - 作用对象是 `arm_mount` 和 `link1~link6`
+  - 当前主要用于代码注释中提到的验证版质量覆盖
 
 ##### Reset-time events
 
 - `randomize_reset_joints`
-  - all 18 joints receive reset perturbations
-  - rough task narrows them to small ranges, then curriculum may widen them later
+  - 全部 18 个关节在 reset 时加入扰动
+  - rough 配置会先把扰动收紧，后续再由 curriculum 逐步放大
 
 - `randomize_reset_base`
-  - small `x/y` base perturbations
-  - rough task keeps reset yaw effectively fixed at zero
-  - reset linear and angular velocities remain zero
+  - 在 reset 时对 base 的 `x/y` 做小范围扰动
+  - rough 配置基本把 reset yaw 固定在 0 附近
+  - reset 时线速度和角速度保持为 0
 
 - `randomize_apply_external_force_torque_base`
-  - samples a persistent external wrench on `base_link`
+  - 给 `base_link` 施加一个 episode 内持续存在的外 wrench
 
 - `randomize_apply_external_force_torque_ee`
-  - samples a persistent external force on `link6`
+  - 给 `link6` 施加一个 episode 内持续存在的外力
 
 ##### Interval event
 
 - `randomize_push_robot`
-  - every `6~8s`
-  - injects a transient push by directly perturbing root velocity
+  - 每 `6~8s` 触发一次
+  - 通过直接扰动 root velocity 的方式实现瞬时 push
 
-##### Currently disabled randomization
+##### 当前关闭的随机化
 
-The following are still disabled in the shared config:
+当前共享配置里仍然关闭了以下 randomization：
 
 - `randomize_rigid_body_material`
 - `randomize_rigid_body_mass_base`
 - `randomize_rigid_body_mass_ee`
 - `randomize_com_positions`
 
-That matches the current README note that full domain randomization is not finished yet.
+这和前面 README 提到的“完整 domain randomization 还没补完”是一致的。
 
-#### Contact Modeling and Terminations
+#### 接触建模与终止条件
 
-An important engineering rule in `go2arm` is that the four feet are treated as the only legal support bodies. All non-foot body contacts are considered illegal.
+`go2arm` 有一个很重要的工程规则：四个足端被视为唯一合法的支撑 body，其余非足端 body 的接触一律视为非法。
 
-Implementation details:
+实现上主要包括：
 
-- one global `contact_forces` sensor covers feet plus relevant non-foot bodies
-- four dedicated filtered foot contact sensors are attached to:
+- 一个全局 `contact_forces` sensor，覆盖足端和相关非足端 body
+- 四个专用的 filtered foot contact sensor，分别挂在：
   - `FL_foot_contact`
   - `FR_foot_contact`
   - `RL_foot_contact`
   - `RR_foot_contact`
-- all non-foot bodies are grouped by `GO2ARM_NON_FOOT_BODY_REGEX`
+- 所有非足端 body 都通过 `GO2ARM_NON_FOOT_BODY_REGEX` 归为非法接触集合
 
-This affects both rewards and termination conditions.
+这会同时影响 reward 和 termination。
 
-Main terminations:
+主要 termination 包括：
 
 - `time_out`
 - `terrain_out_of_bounds`
@@ -490,7 +490,7 @@ Main terminations:
 - `joint_torque_termination`
 - `task_success`
 
-Rough-task overrides include:
+rough 任务里还对其中一些阈值做了覆盖：
 
 - `base_orientation_termination`
   - soft roll/pitch limit `0.30`
@@ -516,15 +516,15 @@ Rough-task overrides include:
   - requires small EE tracking error
   - requires `3` consecutive successful steps
 
-#### Flat vs Rough
+#### Flat 与 Rough 的区别
 
-`flat` is inherited from the same `go2arm` rough task structure. The main difference is terrain:
+`flat` 是从同一套 `go2arm` rough 任务结构继承出来的，主要区别在于 terrain：
 
-- `flat` switches terrain to a plane
-- rough-terrain progression is disabled
-- the same action, observation, command, reward, curriculum, and termination logic is otherwise retained
+- `flat` 会把 terrain 切换成 plane
+- rough-terrain progression 被关闭
+- 动作、观测、命令、奖励、课程和终止逻辑整体保持一致
 
-So from an MDP-design perspective, the current `flat` and `rough` variants mostly differ in terrain complexity and terrain sensing, not in the core loco-manipulation task definition.
+因此从 MDP 设计角度看，当前 `flat` 与 `rough` 的主要差异仍然是地形复杂度和地形感知方式，而不是 loco-manipulation 核心任务定义本身。
 
 ## Citation
 
