@@ -4,13 +4,15 @@
 
 ## Go2Arm Task
 
-`go2arm` 是一个四足机器人背载机械臂的 loco-manipulation 任务，目标是在保持机体稳定行走的同时，让机械臂完成末端位姿跟踪与操作。
+`go2arm` 是一个四足机器人背载机械臂的 loco-manipulation 任务。简单说，就是让机器人一边走，一边把机械臂的末端保持在目标位姿附近。
+
+我最开始想做的是蒸馏训练，让学生策略去学教师策略；但目前这套方法连教师策略都还不能稳定把任务做好。所以这份 README 先把重点放在 `flat` 任务的说明、训练和 `play` 上，`rough` 版本只作为补充保留。
 
 ### Robot Setup
 
 - 机器人主体：Unitree Go2 四足机器人
 - 机械臂：Piper 6 自由度机械臂
-- 安装方式：机械臂通过背部固定安装位 `arm_mount` 安装在 Go2 机体上，URDF 中的链路顺序为 `arm_mount -> link1 -> link2 -> link3 -> link4 -> link5 -> link6`
+- 安装方式：机械臂通过背部固定安装位 `arm_mount` 装到 Go2 机体上，URDF 里的链路顺序是 `arm_mount -> link1 -> link2 -> link3 -> link4 -> link5 -> link6`
 - 末端执行器：`link6`
 
 ### Default Joint State
@@ -57,11 +59,11 @@ joint6 = 0.0
 - `RobotLab-Isaac-Flat-Go2Arm-v0`
 - `RobotLab-Isaac-Rough-Go2Arm-v0`
 
-如果你要训练当前的 rough 版本，建议直接使用下面的命令：
+当前主要推荐先跑 `flat` 版本：
 
 ```bash
 python scripts/reinforcement_learning/rsl_rl/train.py ^
-  --task RobotLab-Isaac-Rough-Go2Arm-v0 ^
+  --task RobotLab-Isaac-Flat-Go2Arm-v0 ^
   --num_envs 4096 ^
   --headless
 ```
@@ -72,7 +74,9 @@ python scripts/reinforcement_learning/rsl_rl/train.py ^
 - `--max_iterations`：覆盖默认训练轮数
 - `--seed`：设置随机种子
 
-训练输出会保存在 `logs/rsl_rl/<experiment_name>` 下，rough 版本默认是 `unitree_go2arm_teacher_rough`。
+训练输出会保存在 `logs/rsl_rl/<experiment_name>` 下，`flat` 版本默认是 `unitree_go2arm_teacher_flat`。
+
+如果你后面要切到 `rough`，把 `--task` 换成 `RobotLab-Isaac-Rough-Go2Arm-v0` 就可以。
 
 ### Play
 
@@ -80,7 +84,7 @@ python scripts/reinforcement_learning/rsl_rl/train.py ^
 
 ```bash
 python scripts/reinforcement_learning/rsl_rl/play.py ^
-  --task RobotLab-Isaac-Rough-Go2Arm-v0 ^
+  --task RobotLab-Isaac-Flat-Go2Arm-v0 ^
   --num_envs 1
 ```
 
@@ -94,18 +98,19 @@ Go2Arm 的 `play` 脚本还支持两个常用调试参数：
 
 ### Note
 
+- 这份说明主要面向 `flat` 任务；`rough` 版本是后续补充，不是当前主线
 - 当前任务请使用 URDF 版本，不要依赖 USD 文件
-- USD 文件无法单独在足端添加 contact sensor，因此当前 go2arm 的精确足端接触逻辑不能直接依赖 USD 资产
+- USD 文件无法单独在足端添加 contact sensor，所以 go2arm 现在的精确足端接触逻辑不能直接靠 USD 资产来做
 
 ## Citation
 
-Please cite the following if you use this code or parts of it:
+This repository is a modified version of `robot_lab`. If you use this version, please cite this repository instead of the upstream original.
 
 ```text
-@software{fan-ziqi2024robot_lab,
+@software{fan-ziqi2026robot_lab_go2arm,
   author = {Ziqi Fan},
-  title = {robot_lab: RL Extension Library for Robots, Based on IsaacLab.},
-  url = {https://github.com/fan-ziqi/robot_lab},
-  year = {2024}
+  title = {robot_lab Go2Arm fork},
+  url = {<replace-with-this-repository-url>},
+  year = {2026}
 }
 ```
