@@ -8,7 +8,7 @@
 
 当前工作主要复现文章 *Learning Whole-Body Loco-Manipulation for Omni-Directional Task Space Pose Tracking with a Wheeled-Quadrupedal-Manipulator* (RAL)。原文面向轮足机器人，主要贡献集中在三类 reward shaping 设计。本项目沿用其奖励形式，并将任务迁移到四足版本。
 
-目前观察到的结果是：在未显式加入机身命令的情况下，再叠加四足机器人的步态约束，训练效果不理想，教师策略也尚未稳定收敛。因此，这份 README 先以 `flat` 任务为主，`rough` 版本仅作为补充保留。
+目前观察到的结果是：由于命令仅为末端执行器位姿，未显式加入机身命令，再叠加四足机器人的步态约束，训练效果不理想。原定通过蒸馏训练学生策略，但是目前教师策略的效果不佳，因此还未添加完整域随机化、蒸馏适配。
 
 ### Robot Setup
 
@@ -49,7 +49,7 @@ joint6 = 0.0
 
 ### Local Version
 
-我本地使用的版本是：
+本地使用的版本是：
 
 - Isaac Sim 4.5
 - Isaac Lab 2.2.1
@@ -72,13 +72,11 @@ python scripts/reinforcement_learning/rsl_rl/train.py ^
 
 常用补充参数：
 
-- `--video`：训练时录制视频
-- `--max_iterations`：覆盖默认训练轮数
+- `--agent=rsl_rl_with_symmetry_cfg_entry_point`：左右对称增强（不使用镜像损失）
+- `--num_envs`：覆盖默认训练并行环境数
 - `--seed`：设置随机种子
 
 训练输出会保存在 `logs/rsl_rl/<experiment_name>` 下，`flat` 版本默认是 `unitree_go2arm_teacher_flat`。
-
-如果你后面要切到 `rough`，把 `--task` 换成 `RobotLab-Isaac-Rough-Go2Arm-v0` 就可以。
 
 ### Play
 
@@ -87,10 +85,10 @@ python scripts/reinforcement_learning/rsl_rl/train.py ^
 ```bash
 python scripts/reinforcement_learning/rsl_rl/play.py ^
   --task RobotLab-Isaac-Flat-Go2Arm-v0 ^
-  --num_envs 1
+  --num_envs 4
 ```
 
-如果要指定固定 checkpoint，可以额外传入 `--checkpoint`；如果要直接加载发布的预训练权重，可以使用 `--use_pretrained_checkpoint`。
+如果要指定固定 checkpoint，可以额外传入 `--checkpoint`。
 
 Go2Arm 的 `play` 脚本还支持两个常用调试参数：
 
