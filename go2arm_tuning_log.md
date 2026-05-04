@@ -27,7 +27,7 @@
 ### 具体改动
 
 - 适配环境注册、旧接口兼容层和 `rsl_rl / IsaacLab` 版本桥接。
-- 核对训练入口、回放入口和配置入口是否使用同一套任务语义。
+- 核对训练入口、回放入口和配置入口是否适配。
 - 相关位置：
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/*`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/*`
@@ -37,23 +37,23 @@
 
 ### 状态
 
-- 在训练和 `play` 基本能跑之后，第一次进入 reward 结构层面的真实修改。
-- 这一版主要处理 `mani regularization` 的总形式，让它从负向惩罚转向可解释的正向调制项。
+- 在训练和 `play` 基本能跑之后，进入 reward 结构层面的真实修改。
+- 主要处理 `mani regularization` 的总形式，让它从负向惩罚转向可解释的正向调制项。
 
 ### 主要问题（表现）
 
 - 原来的 `mani regularization` 更像一组负权重惩罚，与原文所表现的效果相悖。
 - 日志里看到 reward 数值变化时，无法判断是在反映任务进步，还是只是在反映稳定性。
-- 某个 reward 项在总奖励里到底是加法项、门控项还是正则项，语义不够清楚。
+- 某个 reward 项在总奖励里到底是加法项、门控项还是正则项，日志输出不够清楚。
 
 ### 解决思路（原因分析）
 
-- 先把 `mani regularization` 的总语义从“罚多少”改成“质量有多好”。
-- 让它可以和 manipulation 主 reward 并列解释，并能被门控稳定使用。
+- 先把 `mani regularization` 的实现效果从直观惩罚改成门控。
+- 这是原论文中所没有注明的一个问题：**正则项必须是0-1之间的**。
 
 ### 具体改动
 
-- 将 `mani regularization` 从负惩罚改为正向质量分数。
+- 将 `mani regularization` 从负惩罚改为指数形式。
 - 原典型负权重包括：
   - `support_roll = -0.1`
   - `support_feet_slide = -0.05`
@@ -70,8 +70,8 @@
 
 ### 状态
 
-- `mani regularization` 已经改成正向调制项，但子项仍存在量纲不一致问题。
-- 这一版把重点从“总形式”下沉到“每个子项先归一化”。
+- `mani regularization` 已经改成指数形式，但子项仍存在量纲不一致问题。
+- 把重点放在每个子项归一化上
 
 ### 主要问题（表现）
 
@@ -99,12 +99,12 @@
 
 ### 状态
 
-- reward 结构调整后，开始检查具体 reward 参数是否真的接入总奖励。
-- 这一版主要修正 `support_non_foot_contact` 的实现链路。
+- reward 结构调整后，需要检查具体 reward 参数是否真的接入总奖励。
+- 主要修正 `support_non_foot_contact` 的实现链路。
 
 ### 主要问题（表现）
 
-- 配置层已经有 `support_non_foot_contact` 相关参数，但需要确认它们是否真的被 `total_reward` 使用。
+- 配置层已经有 `support_non_foot_contact` 相关参数，但它们是否真的被 `total_reward` 使用还有问题（日志输出一直为0）。
 - 训练虽然在跑，但行为没有真正学起来，单看总 reward 已经不足以定位问题。
 
 ### 解决思路（原因分析）
@@ -127,6 +127,9 @@
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/cus_velocity_env_cfg.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+### 后续复盘
+- **复盘发现问题不在于非足接触奖励没有接好，而是力传感器根本没配置上，这个问题在修改很多版之后才被修复**
 
 ## Version 1.3 -> 1.4
 
@@ -152,11 +155,14 @@
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
   - 与 `ee_pose` 命令缓存相关的实现
 
+### 后续复盘
+- **这一点在原文中确实指出了，但是实现时没注意到，在这一版进行了修复**
+
 ## Version 1.4 -> 1.5
 
 ### 状态
 
-- `mani` 主 tracking 项仍然过敏。
+- `mani` 主 tracking 项仍然过于敏感。
 - 这一版重设 position / orientation tracking 的尺度。
 
 ### 主要问题（表现）
@@ -164,7 +170,7 @@
 - 早期配置中：
   - `mani_position_std = sqrt(0.0004) = 0.02`
   - `mani_orientation_std = sqrt(0.01) = 0.1`
-- `std` 太小导致 tracking 曲线过陡，误差稍大就迅速失去可解释性。
+- `std` 太小导致 tracking 曲线过陡，误差稍大就导致奖励过于稀疏。
 
 ### 解决思路（原因分析）
 
@@ -239,6 +245,9 @@
 - 相关位置：
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
 
+### 后续复盘
+- **这一版的力矩、功率还没有使用effort limits加权的形式，算是一种初步尝试**
+
 ## Version 1.7 -> 1.8
 
 ### 状态
@@ -248,13 +257,13 @@
 
 ### 主要问题（表现）
 
-- 日志里混有目标位姿明细、`gating_mu / gating_l` 等与当前定位关系不大的项。
-- “日志很多，但看不到真正想看的 reward 分解”。
+- 日志里混有目标位姿明细、`gating_mu / gating_l` 等与当前定位关系不大的项，而且是所有环境的平均，即使不在同一个episode阶段。
+- 日志很多，但看不到真正想看的 reward
 
 ### 解决思路（原因分析）
 
 - 训练输出应优先服务 reward 诊断。
-- 命令和门控内部参数不应把核心 reward 分解淹没。
+- 内部固定参数没有必要每次都输出，只是之前debug阶段方便审查。
 
 ### 具体改动
 
@@ -278,8 +287,8 @@
 
 ### 解决思路（原因分析）
 
-- 如果 `stage1` 的命令基准本身不是从真实初始姿态出发，继续调 reward 容易掩盖问题。
-- 需要把 `play` 里看到的起始姿态、训练时实际 reset 的姿态、课程中的近端工作空间放到同一套几何参考下。
+- 如果 `stage1` 的命令基准本身不是从真实初始姿态出发，继续调 reward 不能很好地进行解耦，不确定是loco部分奖励还是mani部分奖励有问题导致最终效果不好
+- 需要把 `play` 里看到的起始姿态、训练时实际 reset 的姿态、课程中的近端工作空间对齐。
 
 ### 具体改动
 
@@ -318,7 +327,31 @@
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/curriculums.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/*`
 
-## Version 2.1 -> 3.0
+## Version 2.1 -> 2.2
+
+### 状态
+
+- 跟踪误差中的权重没有调整，忽略了量纲带来的数值大小差异，导致跟踪误差不能很好反映真实状态。
+- 这一版确定跟踪误差的具体加权。
+
+### 主要问题（表现）
+
+- `tracking_error` 很小，但是实际跟踪效果不佳。
+- 奖励看起来正常，但目标能力没有明显提升。
+
+### 解决思路（原因分析）
+
+- 将0.05m的位置跟踪误差和0.1rad的姿态跟踪误差大概放在同一量级
+
+
+### 具体改动
+
+- 总跟踪误差计算中将姿态跟踪误差的权重调整为0.1，位置跟踪误差权重保持为1
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/cus_velocity_env_cfg.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+## Version 2.2 -> 3.0
 
 ### 状态
 
@@ -327,7 +360,7 @@
 
 ### 主要问题（表现）
 
-- 原始实现中，由于 Isaac Sim 版本和 USD 转换限制，足端不是刚体，无法直接挂载接触传感器。
+- 原始实现中，**由于 Isaac Sim 版本和 USD 转换限制，足端不是刚体，无法直接挂载接触传感器**
 - 足端接触依赖 `calf + offset` 近似实现。
 - 这种近似会把策略引向错误行为，例如爬行式前移、贴地拖行、膝关节触地。
 - 日志、`play` 和实际行为的接触定义持续对不上。
@@ -343,7 +376,7 @@
 - 改为明确使用 URDF，且不合并关节。
 - 合法支撑从 `calf + offset` 近似收缩为四个足端。
 - `calf` 不再被默认视为合法支撑。
-- 重写接触相关 reward、termination 和诊断项的语义。
+- 重写接触相关 reward、termination 和诊断项的逻辑。
 - 相关位置：
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
@@ -353,19 +386,22 @@
 
 ### 状态
 
-- 接触语义接上之后，先修日志、终止和随机化语义的一致性。
+- 接触逻辑修改之后，先修日志、终止和随机化语义的一致性。
 - 这一版不是大重构，而是为后续对比实验补基础诊断。
 
 ### 主要问题（表现）
 
 - `play`、训练日志和 reward 分解仍可能使用不同版本的指标。
 - `task_success` 是否真正触发 termination 需要确认。
-- 外力随机化和机身期望高度的语义需要整理。
+- 训练结果play发现机器人行走时机身高度过低，同时接近目标位姿之后**姿态明显不鲁棒，单脚着地，说明学到了某种平衡点，能够得到比较好的奖励，但是没有抵抗一点干扰的能力**
+
 
 ### 解决思路（原因分析）
 
-- 先让日志、回放和 reward 分解对齐，再做更细的 reward 调参。
+- 先让日志、回放和 reward 对齐，再做更细的 reward 调参。
 - 避免不同地方看到的是不同版本的训练指标。
+- 需要增加外力随机化，避免机器人学到这种一点扰动就不稳定了的局部值。
+- 机身期望高度从0.3m增加到0.4m。
 
 ### 具体改动
 
@@ -378,6 +414,11 @@
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+### 后续复盘
+
+- **这里机身高度由于没有合并关节，因此是以base_link作为标准，相比于合并关节后的base要高 8.9 cm**。后面才注意到这个问题，并把机身参考高度增大到0.42m
+
 
 ## Version 3.1 -> 3.2
 
@@ -394,8 +435,9 @@
 
 ### 解决思路（原因分析）
 
-- 先不改 `loco reward` 主结构，优先调权重和动作幅度。
-- 把“reward 数值看起来大”和“真正主导策略更新”区分开。
+- 先不改 `loco reward` 主结构，优先调权重和动作幅度，保持跟原文奖励框架一致。
+- **这里的loc trackingo奖励可能数值太小，导致四足机器人不能像轮足机器人那样被驱动到主动跟踪，反而更希望站在原地拿到存活奖励**
+- 把“reward 数值看起来大”和“真正主导策略更新”区分开
 
 ### 具体改动
 
@@ -427,7 +469,7 @@
 ### 具体改动
 
 - 调试阶段先不输出 `mani` 奖励。
-- 将 `soft trot` 输出改成更接近真实语义的形式。
+- 将 `soft trot` 输出改成更接近真实实现的形式。
 - 区分：
   - `loco_regu_base_raw`
   - `loco_regu`
@@ -448,7 +490,7 @@
 ### 主要问题（表现）
 
 - 需要区分 `loco` 学不会到底来自 reward 还是 command。
-- 有些配置只是“看起来能动”，但不代表命令语义真的合理。
+- 有些配置只是“看起来能动”，但不代表命令真的合理。
 
 ### 解决思路（原因分析）
 
@@ -473,7 +515,7 @@
 
 ### 主要问题（表现）
 
-- base 稳定项可能把策略锁死成僵硬解。
+- base 稳定项可能把策略锁死成僵硬解，走路姿态过于奇怪，不够自然。
 - reward 问题从“要不要加这项”变成“这项会不会压过真正想学的行为”。
 
 ### 解决思路（原因分析）
@@ -505,8 +547,9 @@
 
 ### 主要问题（表现）
 
-- 需要确认底层顺序和语义没有错位。
+- 需要确认底层顺序和逻辑没有错位。
 - `play` 动作维度、reward 腿索引、接触传感器身体顺序可能不一致。
+- **训练效果发现机器人一只脚踩在中间，一只脚踩在外侧很远，回看奖励发现没有对落足点y轴进行约束**
 
 ### 解决思路（原因分析）
 
@@ -529,7 +572,7 @@
 
 ### 状态
 
-- 对随机化和训练配置边界做认知收束。
+- 对随机化和训练配置边界进行区分，先训练好效果再域随机化。
 - 这一版把“学不会能力”和“泛化增强”拆开。
 
 ### 主要问题（表现）
@@ -545,8 +588,7 @@
 ### 具体改动
 
 - 梳理 `domain randomization` 项。
-- 澄清 `com` 随机化含义。
-- 继续检查初始动作噪声和 `init_noise_std` 相关逻辑。
+- 检查初始动作噪声和 `init_noise_std` 相关逻辑。
 
 ## Version 3.7 -> 4.0
 
@@ -585,13 +627,13 @@
 ### 主要问题（表现）
 
 - 高难 `z` 不仅有低位，还有高位。
-- 低位任务需要覆盖地面物体。
-- 当前命令空间中还存在断裂和空白区域。
+- 低位任务需要覆盖地面物体（期望）。
+- 当前命令空间中还存在断裂和空白区域，并没有覆盖满。
 
 ### 解决思路（原因分析）
 
-- 高难 `z` 应拆成不同任务类别，而不是只用一个连续范围表示。
-- `xy` 和 `z` 对参考系的需求不同，需要开始拆开处理。
+- 高难 `z` 应拆成不同任务类别，而不是只用一个连续范围表示，**逐步增加课程中的高难度任务比例，驱动机器人学会利用机身pitch帮助manipulation**。
+- `xy` 和 `z` 对参考系的需求不同，需要开始拆开处理，**xy应该在机身系下，便于排除明显不合理的命令，z应该在世界系下**。
 
 ### 具体改动
 
@@ -663,7 +705,7 @@
 ### 主要问题（表现）
 
 - 近距离任务中机身下伏严重。
-- 高位任务也先下伏再伸手。
+- **高位任务也先下伏再伸手**。
 - 远 `x` 任务更像跳过去，而不是走过去。
 - 出现 `fz = -2m`、`reward pitch = +0.55rad`、`gravity pitch = -0.55rad` 这类符号不一致现象。
 
@@ -676,7 +718,7 @@
 
 - 修正 `target_height_conditioned_pitch_penalty` 的语义。
 - 在 `play` 中直接输出 `pitch`。
-- 姿态终止阈值收紧为两层：
+- 姿态终止阈值设为更严格形式：
   - 软阈值 `0.4`
   - 硬阈值 `0.5`
 - 相关位置：
@@ -715,6 +757,28 @@
 
 ### 状态
 
+- `trot` 支撑因子作用位置效果过于强大，导致策略根本学不会。
+
+### 主要问题（表现）
+
+- 由于trot在四足支撑时相当于直接把loco阶段奖励乘了0.25，再减去机械臂偏移惩罚，就导致loco阶段奖励特别小，这导致机器人偏向于任何时候都对角脚支撑
+- 对角脚支撑无法保持稳定，机器人撑几步就会跌倒
+
+### 解决思路（原因分析）
+
+- 去掉`support_factor`，因为其作用形式不太好调，更关注使用soft_trot门控来调节步态
+
+### 具体改动
+
+- 直接去掉 `support_factor`
+- 相关位置：
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
+  - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/config/locomanip/go2arm/rough_env_cfg.py`
+
+## Version 4.6 -> 4.7
+
+### 状态
+
 - 讨论是否改成先学 `loco` 再学 `loco + mani`。
 - 这一版形成一个原则：不手动固定 gate 破坏原 soft switch。
 
@@ -735,7 +799,7 @@
   - `gate` 分布位置
   - near / far 占比
 
-## Version 4.6 -> 4.7
+## Version 4.7 -> 4.8
 
 ### 状态
 
@@ -746,11 +810,13 @@
 
 - `x_near` 的日志语义与实际课程观察不一致。
 - 只看总平均无法判断 near 和 far 的行为差异。
+- **机器人只能学会走到任务正下方抬手，没有机身工作位置的显示指令**。
 
 ### 解决思路（原因分析）
 
 - 课程问题必须落到具体命令类别上。
 - 日志应显式区分当前命令属于 near 还是 far。
+- **在总奖励项中加入一个workspace位置的惩罚**，引导机器人将机身放在ee位置对应的舒适工作区内
 
 ### 具体改动
 
@@ -758,18 +824,56 @@
 - 改为输出：
   - 当前命令属于近端还是远端。
   - 该类别下的存活时长。
-- 相关位置：
-  - 训练日志输出注册相关实现
+- 增加workspace_position_reward，惩罚机身离末端位置过近
 
-## Version 4.7 -> 4.8
+## Version 4.8 -> 4.9
 
 ### 状态
 
-- 主线切向 `flat` 任务的终止异常。
+- **先mani再loco+mani和先loco再loco+mani都试过了，发现都有一定问题**
+
+### 主要问题（表现）
+
+- 先mani再loco+mani会导致机器人没办法很好地进行移动，倾向于站在原地不动，还是mani的先验太强
+- 先loco会导致机器人不会伸手，对于低处任务倾向于压低机身高度，但是这样会导致关节力矩过大，姿态不稳定，容易跌倒，还是loco的先验太强
+
+### 解决思路（原因分析）
+
+- **还是决定先loco再loco+mani，因为对于四足机器人，loco是比mani更难学的，如果先学mani再学loco先验太强了，loco不太好学到位（也是参考了很多其他的论文，大多都是先学loco）**
+
+### 具体改动
+
+- 课程固定为先学loco再学loco+mani
+
+## Version 4.9 -> 4.10
+
+### 状态
+
+- 考虑使用左右对称增强，一方面便于训练出更对称、自然的姿态，另一方面加速训练（减小collection时长影响）
+
+### 主要问题（表现）
+
+- 左右对称增强没有实现
+
+### 解决思路（原因分析）
+
+- 参考对称增强的实现，将左右脚、关节、传感器等成对元素进行交换，保持其他不变，增强数据量
+- 将逻辑与命令等对影响，不要没有改命令还继续增强，那就出现了逻辑错误。
+
+### 具体改动
+
+- 实现左右对称增强，但是没有加入镜像损失
+
+## Version 4.10 -> 4.11
+
+### 状态
+
+- 排查任务异常终止的原因。
 - 排查重点从“行为学不会”转向“termination 是否判错、放大错”。
 
 ### 主要问题（表现）
 
+- **现在的主要问题不是能不能学会，而是刚开始就死了，平均episode length只有10步**
 - `joint_torque_termination` 比例异常高。
 - 并行环境规模放大后问题显著恶化。
 - torque reward 惩罚没有明显变大，但 torque termination 明显变多。
@@ -777,7 +881,7 @@
 ### 解决思路（原因分析）
 
 - 终止统计或连续违规判定逻辑本身可能有问题。
-- 不能只看 reward，必须追问 `Term/*` 指标分别代表什么。
+- 不能只看 reward，输出 `Term/*` 细分指标。
 
 ### 具体改动
 
@@ -790,12 +894,12 @@
   - `scripts/reinforcement_learning/rsl_rl/play.py`
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/terminations.py`
 
-## Version 4.8 -> 4.9
+## Version 4.11 -> 4.12
 
 ### 状态
 
-- 显式质疑连续违规终止实现。
-- 终止逻辑基础设施本身被纳入排查范围。
+- 检查连续违规终止实现逻辑是否有误
+- 终止逻辑基础实现逻辑本身被纳入排查范围
 
 ### 主要问题（表现）
 
@@ -812,12 +916,17 @@
 - 将 `_persistent_violation` 纳入重点排查。
 - 对照各类连续 termination 是否存在同类异常。
 
-## Version 4.9 -> 5.0
+### 后续复盘
+
+- 发现连续步数的判断条件确实有问题，**当某一个环境由于连续步数超限终止后，新的环境中的连续步数没有清空**，导致一开始就又终止了。这个问题在4096并行环境中并不明显，但是在16384并行环境中就非常明显了，导致核对日志时才注意到这个问题
+
+## Version 4.12 -> 5.0
 
 ### 状态
 
-- 收口 `play` 和训练日志的 debug 通道。
+- 收束`play` 和训练日志的 debug 通道。
 - 后续判断开始直接依赖 `play` 和训练日志暴露出的 termination 原因。
+- 一次主要大改，这一版本重心已经从调整奖励、课程让策略学会变为了查找导致现在落地就重置的原因
 
 ### 主要问题（表现）
 
@@ -826,8 +935,8 @@
 
 ### 解决思路（原因分析）
 
-- `play` 应承担直接暴露终止原因的角色。
-- debug 输出需要收口，保留可复用的定位通道。
+- `play` 应直接输出终止原因，不能靠肉眼看，猜测终止原因（基座高度、关节力矩、非足接触等不好区分）。
+- debug 输出需要清理一下，删除已经不需要的输出
 
 ### 具体改动
 
@@ -935,6 +1044,11 @@
   - support symmetry 权重和 std
   - `done_count` 与各 termination 曲线
 
+### 最终问题定位
+
+- **导致训练完全崩了的原因是之前由于训练效果不好而增大了workspace惩罚的权重，这一项是负的惩罚，数值太大改过了存活奖励，导致机器人倾向于早死，避免一直受到惩罚**
+- 因此将workspace也修改为指数形式惩罚，数值大小还是正的
+
 ## Version 5.4 -> 5.5
 
 ### 状态
@@ -945,20 +1059,22 @@
 ### 主要问题（表现）
 
 - 默认站姿可能本身就与当前高度阈值和终止条件错位。
+- 前面**核对了很长时间的终止等配置，发现初始版本确实没有现在这一版合理**（按effort limits加权等）
 
 ### 解决思路（原因分析）
 
 - 如果默认形态和阈值本身不相容，再怎么训练也会持续撞 termination。
+- 将终止、命令、reset等数值通过与urdf数据进行对照，确认其适配当前默认站姿和机身高度
 
 ### 具体改动
 
 - 检查默认站姿、机身高度和 termination 阈值是否匹配。
-- 将几何可行性纳入 termination 诊断。
 
 ## Version 5.5 -> 5.6
 
 ### 状态
 
+- **由于loco阶段固定机械臂，但是后面训练一段时间才开始学操纵，因此直觉上需要在加入mani时重置机械臂动作分布和学习率（当前固定机械臂操作实现仅仅是通过将动作clip到0）**
 - 训练器侧的阶段性重置和策略噪声控制进入主线。
 - 版本日志不再只记录环境配置，也开始记录训练脚本机制。
 
@@ -1092,6 +1208,26 @@
 
 ### 状态
 
+- 怀疑是否是urdf导致机器人本身工作空间无法够到地面
+
+### 主要问题（表现）
+
+- 调整了很多版本，但是机器人对于低z任务还是不会伸手。
+
+### 解决思路（原因分析）
+
+- 通过运动学和urdf具体数据计算机械臂是否能够够到地面，以及此时机身高度、倾斜pitch角度是多少
+
+### 具体改动
+
+- 发现当前urdf下确实无法够到地面，甚至x=0.25m（机身系）z=0.1m（世界系）的位置都很难够到
+- 在urdf中将肩关节安装位置向前调整了10cm
+
+
+## Version 6.1 -> 6.2
+
+### 状态
+
 - 非成功终止惩罚加入总奖励。
 - 总奖励开始显式区分“成功结束”和“失败结束”。
 
@@ -1110,7 +1246,7 @@
 - 相关位置：
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
 
-## Version 6.1 -> 6.2
+## Version 6.2 -> 6.3
 
 ### 状态
 
@@ -1120,7 +1256,7 @@
 ### 主要问题（表现）
 
 - `loco` 阶段存在固定 gate 的思路或实现痕迹。
-- 当前最后一层直接同时输出 `leg` 和 `arm` 动作，可能导致进入 `loco + mani` 后遗忘已学到的 `loco`。
+- 当前最后一层直接同时输出 `leg` 和 `arm` 动作，导致进入 `loco + mani` 后遗忘已学到的 `loco`。
 - privileged encoder 结构虽然存在，但需要确认是否真的有梯度流过。
 
 ### 解决思路（原因分析）
@@ -1131,7 +1267,6 @@
 ### 具体改动
 
 - 取消 `loco` 阶段固定 gate，恢复正常 gate 计算。
-- 统一旧入口和新入口的语义，不再随本机 `rsl_rl` 版本条件分流。
 - 训练网络结构方向：
   - 前端共享编码。
   - 后端 `leg / arm` 分头输出。
@@ -1140,4 +1275,21 @@
   - `source/robot_lab/robot_lab/tasks/manager_based/locomotion/velocity/mdp/rewards.py`
   - curriculum / gate 相关配置
   - trainer / PPO 配置与 actor-critic 结构相关实现
+- **这一版同时注意到arm头动作固定为0在ppo训练时带来的错误梯度以及KL散度计算问题，纯loco课程阶段只会考虑leg动作，同时输入的上一帧动作修改为实际作用的动作（arm为0）**，关掉之前设计的重置arm噪声和学习率机制
+
+
+## Version 6.3版本总结
+
+经过这么多次迭代和调整，发现训练效果还是不够好。近处、远处较高z的任务能够存活很长时间，但是还是存在很大问题
+- 1. 工作位置问题。通过使用奖励鼓励的形式虽然可以一定程度上降低走到正下方，但是还是没有明显的动力让机器人把机身放在一个合适的工作位置，导致机器人对于较高的任务还是走的比较近。
+- 2. 低z任务实现效果很差。一是机械臂伸手的驱动不够，不太会伸手，二是机器人很难保持存活，容易因各种原因终止。
+- 3. 步态问题，虽然加入了对称约束、足端落点约束和腿部关节偏离默认构型约束等，但是毕竟是奖励驱动的，并非强制约束，导致学习出来的足端落点还是比较奇怪。loco阶段还算正常，但是mani的支撑很差。
+
+后续调整思路：
+- 毕竟原论文是面向轮足的，四足的机械结构和运动方式与轮足有很大不同，可能通过这种奖励融合的方式没办法很好地学会loco-manipulation任务。
+- 命令只包含了末端执行器的位置姿态，并没有对基座的显示命令。想通过这种端到端的形式学习过于困难。
+- 后续参考其他针对四足机器人的论文，将奖励融合、增强走位一种奖励塑形的方法。
+
+
+
 
