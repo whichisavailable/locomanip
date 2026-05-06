@@ -186,9 +186,7 @@ def joint_torque_termination(
 
     asset = env.scene[asset_cfg.name]
     joint_ids = asset_cfg.joint_ids
-    torque_clipping = torch.abs(
-        asset.data.computed_torque[:, joint_ids] - asset.data.applied_torque[:, joint_ids]
-    )
+    torque_clipping = torch.abs(asset.data.computed_torque[:, joint_ids] - asset.data.applied_torque[:, joint_ids])
 
     if soft_max_ratio is not None:
         torque_dtype = asset.data.computed_torque.dtype

@@ -22,7 +22,6 @@ from robot_lab.tasks.manager_based.locomotion.velocity.cus_velocity_env_cfg impo
     LocomotionVelocityRoughEnvCfg,
 )
 
-
 GO2ARM_LOCO_STAGE_END_ITERATION = 500
 
 

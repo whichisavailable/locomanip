@@ -12,13 +12,13 @@ from rsl_rl.modules.distribution import Distribution
 from rsl_rl.utils import resolve_callable, unpad_trajectories
 from tensordict import TensorDict
 
+from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.legacy_actor_critic import (
+    SplitLegArmActor,
+)
 from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.rsl_rl_compat import (
     MLP,
     EmpiricalNormalization,
     HiddenState,
-)
-from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.agents.legacy_actor_critic import (
-    SplitLegArmActor,
 )
 
 
@@ -107,9 +107,7 @@ class PrivilegedEncoderMLPModel(MLPModel):
         self.distribution_cfg = copy.deepcopy(distribution_cfg)
         if distribution_cfg is None and stochastic:
             distribution_cfg = {
-                "class_name": "HeteroscedasticGaussianDistribution"
-                if state_dependent_std
-                else "GaussianDistribution",
+                "class_name": "HeteroscedasticGaussianDistribution" if state_dependent_std else "GaussianDistribution",
                 "init_std": init_noise_std,
                 "std_type": noise_std_type,
             }

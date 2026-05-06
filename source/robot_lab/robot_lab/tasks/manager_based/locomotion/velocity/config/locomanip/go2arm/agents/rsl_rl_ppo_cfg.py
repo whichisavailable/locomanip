@@ -16,7 +16,6 @@ from robot_lab.tasks.manager_based.locomotion.velocity.config.locomanip.go2arm.r
 )
 from robot_lab.tasks.manager_based.locomotion.velocity.mdp.symmetry import go2arm
 
-
 GO2ARM_LOCO_STAGE_ACTION_MASK = (True,) * 12 + (False,) * 6
 
 

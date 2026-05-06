@@ -390,7 +390,9 @@ def go2arm_reaching_stages(
     env.cfg.commands.ee_pose.tertiary_sample_prob = current_tertiary_sample_prob
     if hasattr(env.cfg.rewards, total_reward_term_name):
         getattr(env.cfg.rewards, total_reward_term_name).params["gating_fixed_d"] = current_gating_fixed_d
-        getattr(env.cfg.rewards, total_reward_term_name).params["workspace_position_std"] = current_workspace_position_std
+        getattr(env.cfg.rewards, total_reward_term_name).params["workspace_position_std"] = (
+            current_workspace_position_std
+        )
     total_reward_term_cfg = env.reward_manager.get_term_cfg(total_reward_term_name)
     total_reward_term_cfg.params["gating_fixed_d"] = current_gating_fixed_d
     total_reward_term_cfg.params["workspace_position_std"] = current_workspace_position_std

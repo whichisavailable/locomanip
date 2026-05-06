@@ -157,20 +157,18 @@ def _print_go2arm_action_state(env, policy_action: torch.Tensor, step: int) -> N
     arm_joint_pos = joint_pos[-6:]
 
     print(
-        "[GO2ARM PLAY step={}] policy_norm={:.3f} exec_norm={:.3f} prev_norm={:.3f} base_w={} ee_w={} ee_b={} policy_arm={} exec_arm={} masked_arm={} arm_joint_delta={} arm_joint_pos={}".format(
-            step,
-            float(policy_action.norm().item()),
-            float(current_action.norm().item()),
-            float(prev_action.norm().item()),
-            [round(float(x), 3) for x in root_pos_w.tolist()],
-            [round(float(x), 3) for x in ee_pos_w.tolist()],
-            [round(float(x), 3) for x in ee_pos_b.tolist()],
-            [round(float(x), 3) for x in policy_arm_action.tolist()],
-            [round(float(x), 3) for x in effective_arm_action.tolist()],
-            [round(float(x), 3) for x in arm_action.tolist()],
-            [round(float(x), 3) for x in arm_joint_delta.tolist()],
-            [round(float(x), 3) for x in arm_joint_pos.tolist()],
-        )
+        f"[GO2ARM PLAY step={step}] "
+        f"policy_norm={float(policy_action.norm().item()):.3f} "
+        f"exec_norm={float(current_action.norm().item()):.3f} "
+        f"prev_norm={float(prev_action.norm().item()):.3f} "
+        f"base_w={[round(float(x), 3) for x in root_pos_w.tolist()]} "
+        f"ee_w={[round(float(x), 3) for x in ee_pos_w.tolist()]} "
+        f"ee_b={[round(float(x), 3) for x in ee_pos_b.tolist()]} "
+        f"policy_arm={[round(float(x), 3) for x in policy_arm_action.tolist()]} "
+        f"exec_arm={[round(float(x), 3) for x in effective_arm_action.tolist()]} "
+        f"masked_arm={[round(float(x), 3) for x in arm_action.tolist()]} "
+        f"arm_joint_delta={[round(float(x), 3) for x in arm_joint_delta.tolist()]} "
+        f"arm_joint_pos={[round(float(x), 3) for x in arm_joint_pos.tolist()]}"
     )
 
 
@@ -380,8 +378,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     timestep = 0
     trace_step = 0
     trace_interval = 20 if args_cli.go2arm_trace_actions else None
-    prev_arm_joint_pos = None
-    prev_ee_pos_b = None
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()

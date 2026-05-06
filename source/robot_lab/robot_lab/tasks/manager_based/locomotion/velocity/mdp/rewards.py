@@ -1842,9 +1842,7 @@ def _compute_go2arm_reward_terms(
     )
     basic_is_alive_weighted = params["basic_is_alive_weight"] * basic_is_alive
     basic_collision_weighted = params["basic_collision_weight"] * basic_collision
-    basic_termination_penalty_weighted = (
-        params.get("basic_termination_penalty_weight", 0.0) * basic_termination_penalty
-    )
+    basic_termination_penalty_weighted = params.get("basic_termination_penalty_weight", 0.0) * basic_termination_penalty
     basic_action_smoothness_first_weighted = (
         params["basic_action_smoothness_first_weight"] * basic_action_smoothness_first
     )
@@ -2842,9 +2840,7 @@ def action_smoothness_second_penalty(env: ManagerBasedRLEnv) -> torch.Tensor:
         # 兼容旧版 IsaacLab：ActionManager 只维护一阶历史时，无法可靠计算二阶差分，
         # 因此这里返回零惩罚而不是伪造历史，避免改变奖励语义。
         return torch.zeros(env.num_envs, device=env.device)
-    diff = torch.square(
-        action - 2 * prev_action + prev_prev_action
-    )
+    diff = torch.square(action - 2 * prev_action + prev_prev_action)
     # 前两步历史不足时，不对二阶项计惩罚。
     diff = diff * (prev_action[:, :] != 0)
     diff = diff * (prev_prev_action[:, :] != 0)

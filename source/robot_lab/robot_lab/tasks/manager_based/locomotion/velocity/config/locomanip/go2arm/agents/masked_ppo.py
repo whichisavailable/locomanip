@@ -1,3 +1,4 @@
+# Copyright (c) 2024-2026 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
 from __future__ import annotations
@@ -307,9 +308,7 @@ class MaskedActionPPO(PPO):
 
             if self.normalize_advantage_per_mini_batch:
                 with torch.no_grad():
-                    advantages_batch = (advantages_batch - advantages_batch.mean()) / (
-                        advantages_batch.std() + 1e-8
-                    )
+                    advantages_batch = (advantages_batch - advantages_batch.mean()) / (advantages_batch.std() + 1e-8)
 
             if self.symmetry and self.symmetry["use_data_augmentation"]:
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
@@ -377,9 +376,7 @@ class MaskedActionPPO(PPO):
             if self.symmetry:
                 data_augmentation_func = self.symmetry["data_augmentation_func"]
                 if not self.symmetry["use_data_augmentation"]:
-                    obs_batch, _ = self._legacy_augment(
-                        data_augmentation_func, obs_batch, None, obs_type="policy"
-                    )
+                    obs_batch, _ = self._legacy_augment(data_augmentation_func, obs_batch, None, obs_type="policy")
 
                 mean_actions_batch = policy.act_inference(obs_batch.detach().clone())
                 action_mean_orig = mean_actions_batch[:original_batch_size]
@@ -537,8 +534,10 @@ class MaskedActionPPO(PPO):
         obs_batch = batch[0]
         cursor = 1
 
-        if cursor < len(batch) and self._is_legacy_obs_batch(batch[cursor]) and not self._is_action_batch(
-            batch[cursor], action_dim
+        if (
+            cursor < len(batch)
+            and self._is_legacy_obs_batch(batch[cursor])
+            and not self._is_action_batch(batch[cursor], action_dim)
         ):
             critic_obs_batch = batch[cursor]
             cursor += 1
@@ -643,9 +642,7 @@ class MaskedActionPPO(PPO):
                 return torch.cat([obs, critic_extra], dim=-1)
         return critic_obs
 
-    def _legacy_policy_log_prob(
-        self, policy, actions: torch.Tensor, action_mask: torch.Tensor | None
-    ) -> torch.Tensor:
+    def _legacy_policy_log_prob(self, policy, actions: torch.Tensor, action_mask: torch.Tensor | None) -> torch.Tensor:
         if action_mask is None:
             return policy.get_actions_log_prob(actions)
         distribution = getattr(policy, "distribution", None)
@@ -669,9 +666,11 @@ class MaskedActionPPO(PPO):
         new_std: torch.Tensor,
         action_mask: torch.Tensor | None,
     ) -> torch.Tensor:
-        kl = torch.log(new_std / old_std + 1.0e-5) + (
-            torch.square(old_std) + torch.square(old_mean - new_mean)
-        ) / (2.0 * torch.square(new_std)) - 0.5
+        kl = (
+            torch.log(new_std / old_std + 1.0e-5)
+            + (torch.square(old_std) + torch.square(old_mean - new_mean)) / (2.0 * torch.square(new_std))
+            - 0.5
+        )
         if action_mask is not None:
             kl = kl[..., action_mask]
         return torch.sum(kl, dim=-1)
