@@ -525,7 +525,7 @@ basic 分支是线性叠加的工程稳定项，主要包括：
 
 为便于持续记录实现过程中的问题、排查、修改和阶段性结论，新增了一份独立日志：
 
-- `go2arm_tuning_log.md`
+- [go2arm_tuning_log.md](go2arm_tuning_log.md)
 
 记录内容包括：
 
