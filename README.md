@@ -54,6 +54,17 @@ joint6 = 0.0
 - Isaac Sim 4.5
 - Isaac Lab 2.2.1
 
+### Setup
+
+安装方式：
+
+在安装好isaacsim和isaaclab后，激活isaaclab的虚拟环境（以命名为isaaclab为例），并运行：
+```bash
+conda activate isaaclab
+cd ~/locomanip
+python -m pip install -e source/robot_lab
+```
+
 ### Training
 
 `go2arm` 任务已经注册了两个环境：
