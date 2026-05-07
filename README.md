@@ -52,7 +52,7 @@ joint6 = 0.0
 本地使用的版本是：
 
 - Isaac Sim 4.5
-- Isaac Lab 2.2.1
+- Isaac Lab 2.3.2(rsl-rl-lib 3.1.2)
 
 ### Setup
 
